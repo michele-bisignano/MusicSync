@@ -1,888 +1,1353 @@
-# MusicSync — Architecture Specification
+# MusicSync --- Architecture Specification
 
-## 1. Purpose
+## 1. Overview
 
-This document defines the high-level architecture of MusicSync.
+MusicSync consists of two logically independent applications:
 
-It describes:
+1.  **Online Backend**
+    -   receives Telegram updates;
+    -   identifies and authorizes Telegram users;
+    -   manages the desired music library;
+    -   performs search/identification;
+    -   stores persistent metadata;
+    -   exposes the synchronization API;
+    -   does not access the USB filesystem.
+2.  **Sync Client**
+    -   currently implemented for Windows;
+    -   manually launched;
+    -   accesses the physical USB;
+    -   scans the managed folder;
+    -   compares desired and physical state;
+    -   downloads missing tracks;
+    -   imports USB-only tracks;
+    -   removes obsolete managed tracks;
+    -   reports synchronization results.
 
-- the main system components;
-- their responsibilities;
-- the boundaries between components;
-- how components communicate;
-- the desired-state synchronization model;
-- the main architectural decisions and constraints.
+The desired library lives online.
 
-This document does not define:
+The physical library lives on the USB.
 
-- functional requirements;
-- database schema;
-- API contracts;
-- concrete classes and interfaces;
-- source-code file structure.
+The sync client reconciles them.
 
-Those aspects are defined in the other project documents.
+### Deployment note
 
----
+The first deployment is online, with Cloudflare Workers + D1 as the
+current implementation choice.
 
-# 2. System Architecture
+This is not an architectural requirement. The backend could later be
+moved to a local Linux server or another deployment model without
+changing the domain/application responsibilities.
 
-MusicSync consists of two independent applications:
+------------------------------------------------------------------------
 
-1. **Online Backend**
-2. **Windows Sync Client**
+## 2. Technology Choices
 
-The backend is continuously available online and manages the desired music library.
+### 2.1 Backend
 
-The Windows client is manually launched by the user and synchronizes the desired library with the physical USB drive.
+Current implementation:
 
-```text
-                         INTERNET
-                            │
-             ┌──────────────┴──────────────┐
-             │                             │
-             ▼                             ▼
-       ┌───────────┐               ┌──────────────┐
-       │ Telegram  │               │  YouTube     │
-       │   Bot     │               │  Data API    │
-       └─────┬─────┘               └──────┬───────┘
-             │                            │
-             │ HTTPS                      │ HTTPS
-             ▼                            │
-       ┌────────────────────────────────────────┐
-       │             ONLINE BACKEND             │
-       │                                        │
-       │ Telegram interface                     │
-       │ Search                                 │
-       │ Library management                     │
-       │ Synchronization API                    │
-       │                                        │
-       │              Cloudflare Worker         │
-       │                     │                  │
-       │                     ▼                  │
-       │                Cloudflare D1            │
-       └─────────────────────┬──────────────────┘
-                             │
-                            HTTPS
-                             │
-                             ▼
-                    ┌──────────────────┐
-                    │ Windows Client   │
-                    │                  │
-                    │ Sync             │
-                    │ USB filesystem   │
-                    │ Download         │
-                    └────────┬─────────┘
-                             │
-                             ▼
-                       ┌───────────┐
-                       │ USB Drive │
-                       └───────────┘
-```
-
-The backend never accesses the USB filesystem.
-
-The Windows client never accesses the database directly.
-
-The two components communicate through the synchronization API.
-
----
-
-# 3. Online Backend
-
-The backend is the online part of MusicSync.
-
-Its main responsibilities are:
-
-- receiving Telegram interactions;
-- authorizing Telegram users;
-- searching YouTube;
-- validating YouTube URLs;
-- managing the desired music library;
-- persisting library state;
-- exposing the synchronization API.
-
-The backend runs as a single Cloudflare Worker.
-
-It does not require a home server or continuously running local machine.
-
----
-
-# 4. Windows Sync Client
-
-The Windows client is the local part of MusicSync.
-
-Its responsibilities are:
-
-- accessing the configured USB drive;
-- determining the physical USB state;
-- reconciling physical state with desired state;
-- importing USB-originated music;
-- downloading missing tracks;
-- removing obsolete managed tracks;
-- reporting synchronization results.
-
-The client is manually launched by the user.
-
-It is not a background service and does not need to remain running.
-
----
-
-# 5. Technology Choices
-
-## 5.1 Backend
-
-The backend uses:
-
-```text
+``` text
 Cloudflare Workers
 TypeScript
+```
+
+Cloudflare is chosen because it provides a small HTTPS endpoint, webhook
+support and a convenient free-tier deployment for the current project.
+
+The code should avoid coupling domain/application logic directly to
+Cloudflare APIs.
+
+### 2.2 Database
+
+Current implementation:
+
+``` text
 Cloudflare D1
 ```
 
-The Worker contains the application logic and accesses D1 through its binding.
+D1 is SQLite-compatible and stores metadata only.
 
----
+Audio files are never stored in the database.
 
-## 5.2 Telegram
+The persistence layer must remain isolated enough that another database
+implementation can be introduced later.
 
-Telegram communication uses the Telegram Bot API.
+### 2.3 Telegram
 
-Telegram updates are received through a webhook.
-
-```text
-Telegram
-    │
-    │ HTTPS
-    ▼
-Cloudflare Worker
+``` text
+Telegram Bot API
+Webhook
 ```
 
-Telegram is the user-facing interface of the first version.
+Telegram sends updates to the backend through an HTTPS webhook.
 
----
+There is no polling process.
 
-## 5.3 YouTube
+Telegram provides the sender identity through its numeric User ID.
 
-The backend uses the YouTube Data API for search and metadata retrieval.
+MusicSync uses that ID to decide whether the sender is authorized.
 
-The YouTube API key is a backend secret and is never exposed to the user or Windows client.
+### 2.4 YouTube
 
----
+Current search/source provider:
 
-## 5.4 Windows Client
+``` text
+YouTube Data API
+```
 
-The Windows client uses Python.
+The API key is stored as a backend secret.
 
-Audio downloading and conversion are performed locally using:
+The Windows client does not receive the API key.
 
-```text
+YouTube is also the initial source used for downloading through yt-dlp.
+
+### 2.5 Optional Spotify integration
+
+The search architecture should permit an optional Spotify
+search/metadata provider.
+
+The intended use is identification and metadata enrichment, for example:
+
+``` text
+confused user description
+        ↓
+Spotify / other music metadata provider
+        ↓
+canonical artist + title + metadata
+        ↓
+YouTube search
+        ↓
+local ranking
+```
+
+Spotify is not an audio source.
+
+Spotify should not be made a mandatory architectural dependency unless
+its API access is verified and the project explicitly adopts it.
+
+### 2.6 Downloader
+
+The sync client uses:
+
+``` text
 yt-dlp
 FFmpeg
 ```
 
 The backend never downloads audio.
 
----
+### 2.7 Sync Client
 
-# 6. Desired State and Physical State
+Current implementation:
 
-MusicSync deliberately separates two states.
-
-### Desired state
-
-The online database represents what the music library **should contain**.
-
-### Physical state
-
-The USB represents what physically exists on the drive.
-
-```text
-          DESIRED STATE
-        Online Database
-               │
-               │
-               ▼
-       Windows Sync Client
-               │
-               │ reconciliation
-               ▼
-          PHYSICAL STATE
-             USB
+``` text
+Python
 ```
 
-The Windows client is responsible for reconciling these states.
+Python is used for filesystem operations, HTTP communication, subprocess
+execution, testing and later packaging.
 
-The database is not intended to continuously mirror the filesystem.
+------------------------------------------------------------------------
 
----
+## 3. High-Level Architecture
 
-# 7. Synchronization Model
-
-Synchronization is a reconciliation process rather than a continuous replication system.
-
-The client:
-
-1. retrieves the desired state;
-2. scans the managed USB folder;
-3. determines the physical state;
-4. compares the two states;
-5. creates a synchronization plan;
-6. executes the plan;
-7. reports the result.
-
-Conceptually:
-
-```text
-Desired State
-      +
-Physical State
-      │
-      ▼
-Sync Planner
-      │
-      ▼
-Sync Plan
-      │
-      ▼
-Sync Executor
-      │
-      ▼
-Updated USB
-      │
-      ▼
-Report
+``` text
+                    ┌───────────────────────┐
+                    │       Telegram        │
+                    │         Bot           │
+                    └───────────┬───────────┘
+                                │ HTTPS
+                                ▼
+                    ┌───────────────────────┐
+                    │    Online Backend     │
+                    │                       │
+                    │ Telegram adapter      │
+                    │ Authorization         │
+                    │ Search                │
+                    │ Library application    │
+                    │ Sync API              │
+                    │ Persistence           │
+                    └───────────┬───────────┘
+                                │
+                              HTTPS
+                                │
+                                ▼
+                    ┌───────────────────────┐
+                    │     Sync Client       │
+                    │                       │
+                    │ Sync planner          │
+                    │ Sync executor         │
+                    │ USB filesystem        │
+                    │ Downloader            │
+                    └───────────┬───────────┘
+                                │
+                                ▼
+                           USB / Music
 ```
 
-The planning phase should be separated from filesystem modification so that synchronization decisions can be tested independently.
-
----
-
-# 8. Synchronization Authority
-
-The backend is authoritative for the **desired library**.
-
-The USB is authoritative for the **physical filesystem state** at the moment it is scanned.
-
-The Windows client does not independently decide that a Song should belong to the online library simply because it exists locally.
-
-USB-originated files are instead identified and explicitly reconciled with the backend.
-
-This distinction prevents the client from silently changing the desired library during ordinary synchronization.
-
----
-
-# 9. Synchronization Versioning
-
-The backend maintains a monotonically increasing synchronization version.
-
-A library change produces a new version of the desired state.
-
-```text
-Version 10
-    │
-    │ library change
-    ▼
-Version 11
-```
-
-The Windows client synchronizes a specific version of the desired state.
-
-If the online library changes while synchronization is running, the client must not claim to have synchronized the newer state.
-
-Example:
-
-```text
-Client fetches version 42
-          │
-          ▼
-User changes library
-          │
-          ▼
-Backend becomes version 43
-          │
-          ▼
-Client finishes version 42
-```
-
-The client reports version 42.
-
-A later synchronization can reconcile version 43.
-
----
-
-# 10. Telegram Authorization
-
-Telegram is the only user-facing authorization mechanism.
-
-The Telegram layer checks the sender's numeric Telegram User ID against the configured list of authorized IDs.
-
-```text
-Telegram User ID
-       │
-       ▼
-Telegram Authorization
-       │
-   ┌───┴───┐
-   │       │
- allowed  rejected
-   │
-   ▼
-command processing
-```
-
-There is:
-
-- no MusicSync user account system;
-- no `users` table;
-- no username-based authorization;
-- no role hierarchy.
-
-Authorization applies to Telegram operations such as adding, removing, listing and force-adding songs.
-
-The Windows synchronization client does not represent a separate MusicSync user.
-
----
-
-# 11. Telegram Application Boundary
-
-Telegram is treated as an interface layer.
-
-The internal application logic must not depend on Telegram command names.
-
-Conceptually:
-
-```text
-Telegram Update
-      │
-      ▼
-Telegram Interface
-      │
-      ▼
-Application Logic
-      │
-      ▼
-Domain / Persistence
-```
-
-The Telegram layer is responsible for:
-
-- parsing updates;
-- authorization;
-- command handling;
-- confirmation interactions;
-- formatting responses.
-
-It must not contain database or synchronization logic.
-
----
-
-# 12. YouTube URL Validation
-
-User-provided URLs are untrusted input.
-
-YouTube URL validation is therefore performed by the backend before metadata retrieval or persistence.
-
-```text
-User URL
-   │
-   ▼
-YouTube URL Validator
-   │
-   ├── invalid ──► reject
-   │
-   └── valid
-        │
-        ▼
-YouTube Metadata Provider
-```
-
-The validator is responsible only for determining whether the URL belongs to a supported YouTube URL format.
-
-It must validate the actual hostname rather than merely searching for the string `youtube.com`.
-
-The exact supplied URL is preserved after successful validation.
-
-This validation is separate from Telegram authorization:
-
-```text
-Telegram authorization
-    → "Is this user allowed to use MusicSync?"
-
-YouTube URL validation
-    → "Is this input actually a supported YouTube URL?"
-```
-
----
-
-# 13. Search Architecture
-
-Search is divided into external candidate retrieval and local interpretation.
-
-```text
-User query
-    │
-    ▼
-YouTube Search Provider
-    │
-    ▼
-Candidate results
-    │
-    ▼
-Normalization
-    │
-    ▼
-Local Ranking
-    │
-    ▼
-Candidates shown to user
-```
-
-The external provider is responsible for retrieving candidates.
-
-The local search logic is responsible for:
-
-- normalization;
-- relevance evaluation;
-- version interpretation;
-- ranking;
-- filtering unsuitable candidates.
-
-Search and ranking do not directly modify the library.
-
-A Song enters the library only after the user confirms the selected result.
-
----
-
-# 14. Domain Boundary
-
-The core domain represents logical music concepts independently from external services.
-
-The central relationship is:
-
-```text
-Song
-  │
-  └── Track
-```
-
-A `Song` represents a logical item in the desired library.
-
-A `Track` represents its physical manifestation on the USB.
-
-The domain must not depend directly on:
-
-- Telegram;
-- YouTube;
-- Cloudflare;
-- D1;
-- yt-dlp;
-- FFmpeg;
-- Windows filesystem APIs.
-
-External dependencies enter the system through dedicated integration boundaries.
-
----
-
-# 15. Persistence Boundary
-
-Database access is isolated from application and domain logic.
-
-Conceptually:
-
-```text
-Application Logic
-       │
-       ▼
-Repository / Persistence Boundary
-       │
-       ▼
-Cloudflare D1
-```
-
-Application logic must not contain raw SQL.
-
-The exact tables, columns, constraints and queries are defined in `DATABASE.md`.
-
-The concrete repository classes and interfaces are defined in `PROJECT_STRUCTURE.md`.
-
----
-
-# 16. Filesystem Boundary
-
-The Windows filesystem is isolated behind the local USB layer.
-
-```text
-Sync Logic
-     │
-     ▼
-Filesystem Boundary
-     │
-     ▼
-USB Drive
-```
-
-The synchronization logic should not directly manipulate arbitrary filesystem paths.
-
-All filesystem operations must remain within the configured managed folder.
-
-Files outside that folder are outside MusicSync's responsibility.
-
----
-
-# 17. Download Boundary
-
-Downloading is isolated from synchronization planning and database persistence.
-
-```text
-Sync Executor
-     │
-     ▼
-Downloader
-     │
-     ├── yt-dlp
-     └── FFmpeg
-```
-
-The downloader is responsible for turning an approved YouTube source into a completed MP3.
-
-It does not decide:
-
-- which Song should be downloaded;
-- whether a Song belongs to the library;
-- whether a file should be deleted.
-
-Those decisions belong to higher-level synchronization logic.
-
----
-
-# 18. Download Safety
-
-The Windows client must never download an arbitrary URL supplied directly by a user.
-
-The client may download only a YouTube URL that has already been:
-
-1. validated by the backend;
-2. included in the desired synchronization state.
-
-This creates a deliberate security boundary:
-
-```text
-User input
-    │
-    ▼
-Backend validation
-    │
-    ▼
+The boundary is intentional:
+
+``` text
+ONLINE
+──────────────────────────────
+Telegram
+Backend
+Database
+Search
 Desired state
-    │
-    ▼
-Windows client
-    │
-    ▼
-Downloader
+
+
+LOCAL
+──────────────────────────────
+Sync client
+USB
+Filesystem
+yt-dlp
+FFmpeg
+Physical state
 ```
 
-Telegram input therefore never becomes a direct command to the local downloader.
+------------------------------------------------------------------------
 
----
+## 4. Telegram Authorization
 
-# 19. Safe Synchronization
+There is no MusicSync user-account system.
 
-Synchronization must fail safely whenever the client cannot establish a trustworthy state.
+The Telegram Bot API supplies the sender's numeric User ID.
+
+MusicSync compares it with:
+
+``` text
+AUTHORIZED_TELEGRAM_IDS
+```
+
+The authorization decision is made by the MusicSync application, not by
+a login system.
+
+Unauthorized updates should be ignored without a useful response.
+
+The backend should not expose library contents, command help or
+configuration information to unauthorized users.
+
+This makes the project reusable: each deployment supplies its own bot
+token and allowlist.
+
+------------------------------------------------------------------------
+
+## 5. Backend Responsibilities
+
+The backend is responsible for:
+
+-   Telegram webhook handling;
+-   Telegram command parsing;
+-   Telegram authorization;
+-   search and candidate identification;
+-   search ranking;
+-   duplicate detection;
+-   add/remove/list application logic;
+-   persistent desired-library state;
+-   synchronization API;
+-   sync version management;
+-   accepting synchronization reports;
+-   validating YouTube URLs;
+-   metadata retrieval.
+
+The backend is not responsible for:
+
+-   USB access;
+-   Windows filesystem access;
+-   Linux filesystem access;
+-   MP3 downloading;
+-   FFmpeg execution;
+-   scanning physical files;
+-   deciding whether a USB file physically exists.
+
+------------------------------------------------------------------------
+
+## 6. Domain Model
+
+The domain contains only the concepts required by the current problem.
+
+### Song
+
+Represents the logical library item.
+
+Conceptual fields:
+
+``` text
+id
+artist
+title
+normalized_artist
+normalized_title
+version_type
+youtube_url?
+status
+created_at
+updated_at
+```
+
+`youtube_url` is optional because a Song imported from an existing USB
+file may not have a known YouTube source.
+
+### Track
+
+Represents a physical file managed by MusicSync.
+
+Conceptual fields:
+
+``` text
+id
+song_id
+relative_path
+created_at
+updated_at
+```
+
+A Track does not contain a live `missing` state.
+
+The client discovers the current physical state by scanning the USB.
+
+### SyncState
+
+Represents synchronization metadata:
+
+``` text
+sync_version
+last_sync_started_at
+last_sync_completed_at
+last_sync_status
+```
+
+The first version uses one global singleton state.
+
+------------------------------------------------------------------------
+
+## 7. No Source Entity
+
+There is intentionally no `Source` entity in the first version.
+
+The first version stores the selected YouTube URL directly on `Song`:
+
+``` text
+Song
+ └── youtube_url
+```
+
+This keeps the persistence model small.
+
+If future requirements need multiple persistent sources per Song, that
+can be introduced later as an explicit architectural change.
+
+The current architecture must not reintroduce `SourceRepository`,
+`sources`, or a Song → Source → Track chain.
+
+------------------------------------------------------------------------
+
+## 8. Search Architecture
+
+Search is designed to resemble a modern music search, especially
+Spotify.
+
+The system should not depend on exact wording.
+
+### 8.1 Provider stage
+
+Providers may produce candidates and/or canonical metadata.
+
+Possible providers:
+
+``` text
+SpotifySearchProvider       optional
+YouTubeSearchProvider       current
+Other provider              future
+```
+
+### 8.2 Identification stage
+
+A provider may transform an unclear query into:
+
+``` text
+artist
+title
+version
+additional metadata
+```
+
+This information can then improve YouTube search.
+
+### 8.3 Ranking stage
+
+A local ranking component combines:
+
+-   artist similarity;
+-   title similarity;
+-   token overlap;
+-   word order;
+-   spelling similarity;
+-   accent/punctuation normalization;
+-   version compatibility;
+-   unwanted-term penalties;
+-   provider relevance/popularity where available;
+-   confidence.
+
+The ranking should remain deterministic where practical.
+
+The system should return at most three primary candidates.
+
+------------------------------------------------------------------------
+
+## 9. Normalization
+
+Normalization is shared by search and duplicate detection.
+
+Typical operations:
+
+``` text
+lowercase
+accent normalization/removal
+punctuation normalization
+whitespace normalization
+irrelevant suffix removal
+```
 
 Examples:
 
-### Backend unavailable
+``` text
+Get Lucky (Official Video)
+        ↓
+get lucky
 
-```text
-Backend unavailable
-       │
-       ▼
-No reliable desired state
-       │
-       ▼
-No destructive synchronization
+GET LUCKY - Official Music Video
+        ↓
+get lucky
 ```
 
-### USB unavailable
+Normalization must never alter the original display metadata.
 
-```text
-USB unavailable
-       │
-       ▼
-No filesystem synchronization
+Meaningful version markers must be preserved.
+
+------------------------------------------------------------------------
+
+## 10. Version Detection
+
+The application recognizes:
+
+``` text
+standard
+cover
+remix
+acoustic
+live
 ```
 
-### Interrupted download
+The normalization/ranking layer must distinguish meaningful variants.
 
-```text
-Incomplete download
-       │
-       ▼
-Must not appear as completed Track
+For ordinary searches:
+
+``` text
+live
 ```
 
-The general principle is:
+receives a strong exclusion/penalty unless explicitly requested.
 
-> When synchronization cannot be performed safely, leave the existing data untouched and report the failure.
+A radio edit is normally treated as standard unless explicitly
+distinguished.
 
----
+------------------------------------------------------------------------
 
-# 20. USB Import
+## 11. Duplicate Detection
 
-The client may discover MP3 files that were not previously known to MusicSync.
+Primary logical identity:
 
-These files can be identified and reported to the backend.
-
-```text
-USB-only file
-      │
-      ▼
-Identification
-      │
-      ▼
-Backend report
+``` text
+normalized_artist
++
+normalized_title
++
+version_type
 ```
 
-The physical file remains on the USB.
+Exact YouTube URL equality is also checked when a URL exists.
 
-Import is therefore a controlled mechanism for reconciling USB-originated changes with the online desired library.
+The same logical Song found through multiple YouTube uploads normally
+remains one Song.
 
----
+The selected URL is retained.
 
-# 21. Backend Changes During Synchronization
+### Forced addition
 
-The backend and Windows client operate independently.
+`/force` is handled at the application level.
 
-Telegram can modify the desired library while the Windows client is synchronizing.
+Because the first version stores one selected URL directly on Song and
+has no Source collection, forcing a second URL for an already populated
+logical Song is not represented as a second Source.
 
-The synchronization protocol therefore uses versioning rather than assuming that the desired state remains unchanged for the entire operation.
+The implementation must therefore define a safe policy for this case,
+for example requiring the user to explicitly choose whether the existing
+Song's URL should be replaced. The database layer must not invent a
+second source entity solely to satisfy `/force`.
 
-The client must never overwrite a newer backend state with information derived from an older synchronization snapshot.
+------------------------------------------------------------------------
 
----
+## 12. YouTube URL Validation
 
-# 22. Concurrency Model
+Validation is performed before:
 
-The first version assumes a single active Windows synchronization client.
+-   metadata retrieval;
+-   persistence;
+-   downloading.
 
-Multiple authorized Telegram users may modify the online library.
+At minimum the accepted host patterns must include:
 
-The backend must preserve consistency of library changes.
+``` text
+www.youtube.com
+youtube.com
+youtu.be
+```
 
-A complex distributed locking mechanism is not required.
+The parser must validate the hostname structurally rather than checking
+whether the string merely contains `youtube.com`.
 
-Synchronization versioning is sufficient for the first version.
+Invalid examples:
 
----
+``` text
+youtube.com.evil.example
+evil.example/youtube.com/...
+```
 
-# 23. Configuration Boundary
+The exact confirmed user URL is preserved.
 
-Configuration is external to application logic.
+`/force` does not bypass validation.
 
-The backend requires configuration for:
+------------------------------------------------------------------------
 
-```text
+## 13. Telegram Flow
+
+The backend receives:
+
+``` text
+POST /telegram/webhook
+```
+
+Flow:
+
+``` text
+Telegram
+   ↓
+Webhook adapter
+   ↓
+Parse update
+   ↓
+Check Telegram User ID
+   ↓
+Ignore if unauthorized
+   ↓
+Command/application service
+   ↓
+Database/provider
+   ↓
+Telegram response
+```
+
+Handlers must not contain raw SQL or domain business rules.
+
+------------------------------------------------------------------------
+
+## 14. Add Flow
+
+``` text
+Telegram
+   ↓
+query
+   ↓
+SearchService
+   ↓
+candidate providers
+   ↓
+ranking
+   ↓
+top 3
+   ↓
+user confirmation
+   ↓
+duplicate detection
+   ↓
+LibraryService
+   ↓
+Song persistence
+   ↓
+sync_version++
+```
+
+The physical USB is not accessed.
+
+------------------------------------------------------------------------
+
+## 15. Direct YouTube URL Flow
+
+``` text
+User URL
+   ↓
+URL validation
+   ↓
+metadata retrieval
+   ↓
+metadata normalization
+   ↓
+duplicate detection
+   ↓
+confirmation
+   ↓
+Song persistence
+   ↓
+sync_version++
+```
+
+The original URL is retained.
+
+------------------------------------------------------------------------
+
+## 16. Remove Flow
+
+``` text
+Telegram
+   ↓
+search/select Song
+   ↓
+explicit confirmation
+   ↓
+mark Song removed
+   ↓
+sync_version++
+```
+
+The physical Track is not immediately deleted.
+
+The next synchronization reconciles the USB.
+
+Soft removal allows the client to know which previously managed physical
+path should be removed.
+
+------------------------------------------------------------------------
+
+## 17. Synchronization API
+
+The API is intentionally small.
+
+Current endpoints:
+
+``` text
+GET  /api/v1/sync/state
+POST /api/v1/sync/report
+```
+
+There is no `/sync/start` endpoint.
+
+Starting synchronization is a local client action.
+
+### HTTPS
+
+The API is an HTTP/REST API conceptually, but production traffic uses
+HTTPS.
+
+There is no reason to expose the production synchronization API over
+plaintext HTTP.
+
+HTTP may be used for controlled local development if needed.
+
+------------------------------------------------------------------------
+
+## 18. GET /api/v1/sync/state
+
+Returns the desired library snapshot and its version.
+
+Conceptually:
+
+``` json
+{
+  "sync_version": 42,
+  "songs": [
+    {
+      "id": 123,
+      "artist": "Daft Punk",
+      "title": "Get Lucky",
+      "version_type": "standard",
+      "youtube_url": "https://www.youtube.com/watch?v=..."
+    }
+  ],
+  "tracks": [
+    {
+      "song_id": 123,
+      "relative_path": "Music/Daft Punk - Get Lucky.mp3"
+    }
+  ]
+}
+```
+
+The exact JSON schema belongs in `API.md`.
+
+A Song may have:
+
+``` text
+youtube_url = null
+```
+
+The client must not assume that every desired Song can be downloaded.
+
+If a desired Song has no URL, it needs a later source-identification
+step rather than an arbitrary YouTube search performed silently by the
+sync client.
+
+------------------------------------------------------------------------
+
+## 19. POST /api/v1/sync/report
+
+The client reports the result of synchronization.
+
+The report must identify the desired-library version against which the
+client worked.
+
+Operations may include:
+
+``` text
+download
+delete
+import
+```
+
+The report must not allow an older synchronization to overwrite newer
+desired state.
+
+Example:
+
+``` text
+client synchronized version 42
+backend is already version 43
+```
+
+The backend records the result without downgrading version 43.
+
+USB-originated imports may cause a library mutation and therefore a new
+`sync_version`.
+
+------------------------------------------------------------------------
+
+## 20. Sync Version Semantics
+
+Every desired-library mutation is part of a versioned sequence.
+
+Conceptually:
+
+``` text
+library version 41
+       ↓
+add Song
+       ↓
+library version 42
+```
+
+The client gets a snapshot:
+
+``` text
+DesiredState(version=42)
+```
+
+If the backend becomes version 43 during the run, the client does not
+claim to have synchronized 43.
+
+The backend remains authoritative.
+
+The client may be asked to synchronize again later.
+
+No distributed lock is required.
+
+------------------------------------------------------------------------
+
+## 21. Sync Client Architecture
+
+The client is separated into:
+
+``` text
+BackendClient
+SyncService
+SyncPlanner
+SyncExecutor
+FileSystem
+UsbScanner
+FilenameParser
+Downloader
+Configuration
+CLI
+```
+
+### BackendClient
+
+Communicates with the backend API.
+
+### SyncPlanner
+
+Receives:
+
+``` text
+DesiredState
+PhysicalState
+```
+
+and produces:
+
+``` text
+SyncPlan
+```
+
+### SyncExecutor
+
+Executes the plan.
+
+It does not decide what the plan should be.
+
+### FileSystem
+
+Abstracts filesystem operations that may differ between Windows and
+future Linux implementations.
+
+### Downloader
+
+Abstracts audio download.
+
+Current implementation:
+
+``` text
+YtDlpDownloader
+```
+
+------------------------------------------------------------------------
+
+## 22. USB Scan
+
+The scanner reads only the managed folder.
+
+Example:
+
+``` text
+D:\
+└── Music/
+    ├── Daft Punk - Get Lucky.mp3
+    ├── Queen - Don't Stop Me Now.mp3
+    └── notes.txt
+```
+
+Only MP3 files are candidates for music synchronization.
+
+The scanner produces a physical representation containing information
+such as:
+
+``` text
+relative_path
+filename
+artist
+title
+normalized_artist
+normalized_title
+version_type
+```
+
+It does not claim that an unknown file is managed merely because it is
+inside the folder.
+
+------------------------------------------------------------------------
+
+## 23. Sync Planning
+
+The planner compares desired and physical state.
+
+Example:
+
+``` text
+Desired:
+    A
+    B
+    C
+
+USB:
+    A
+    B
+    D
+
+Plan:
+    KEEP A
+    KEEP B
+    DOWNLOAD C
+    IMPORT D
+```
+
+Deletion is allowed only when the physical file is confidently
+associated with a managed Track and the Song is no longer desired.
+
+Unknown files are protected.
+
+The planner should be deterministic and highly testable.
+
+------------------------------------------------------------------------
+
+## 24. Importing Existing USB Music
+
+Import is not limited to the first ever synchronization.
+
+It can happen whenever the client finds a USB file that is not known to
+the database.
+
+Important rule:
+
+``` text
+USB import does not require discovering a YouTube URL.
+```
+
+If the client can identify:
+
+``` text
+Artist
+Title
+Version
+```
+
+it can create/update the Song with:
+
+``` text
+youtube_url = null
+```
+
+The selected source can be added later.
+
+This avoids unnecessary YouTube/API calls and makes synchronization
+efficient.
+
+------------------------------------------------------------------------
+
+## 25. Track Persistence
+
+The database stores only what is necessary to associate managed physical
+files with Songs.
+
+A Track stores:
+
+``` text
+song_id
+relative_path
+```
+
+plus timestamps and its own identifier.
+
+It does not store:
+
+-   USB volume label;
+-   absolute Windows path;
+-   live existence status;
+-   `missing` status;
+-   downloader information;
+-   source entity;
+-   duplicate metadata.
+
+The current physical state is always obtained by scanning the USB.
+
+------------------------------------------------------------------------
+
+## 26. Download Process
+
+Only one download is processed at a time.
+
+Conceptually:
+
+``` text
+Song.youtube_url
+      ↓
+yt-dlp
+      ↓
+temporary file
+      ↓
+FFmpeg conversion
+      ↓
+final MP3
+      ↓
+controlled rename
+```
+
+Final name:
+
+``` text
+Artist - Title.mp3
+```
+
+Unsafe path characters are sanitized.
+
+The downloader must not permit user-controlled paths to escape the
+managed folder.
+
+------------------------------------------------------------------------
+
+## 27. Interrupted Downloads
+
+A download must not create a file that looks complete before success.
+
+Example:
+
+``` text
+Artist - Song.mp3.part
+```
+
+Only after success:
+
+``` text
+Artist - Song.mp3
+```
+
+If the process stops, the next run can detect temporary state and
+recover safely.
+
+A `.part` file is not a managed Track.
+
+------------------------------------------------------------------------
+
+## 28. Safe Destructive Operations
+
+Before deleting a file, the client must establish:
+
+1.  it is inside the configured managed folder;
+2.  it is associated with a managed Track;
+3.  its Song is no longer desired;
+4.  the desired-state snapshot is complete and valid.
+
+If confidence is insufficient:
+
+``` text
+DO NOT DELETE
+```
+
+Safety has priority over perfect cleanup.
+
+------------------------------------------------------------------------
+
+## 29. Backend Failure
+
+If the client cannot obtain a complete desired state:
+
+``` text
+STOP
+```
+
+No destructive synchronization should occur.
+
+The client should report a useful error.
+
+------------------------------------------------------------------------
+
+## 30. USB Failure
+
+If the USB path is unavailable:
+
+``` text
+STOP
+```
+
+No filesystem changes occur.
+
+------------------------------------------------------------------------
+
+## 31. Logging
+
+The client uses concise structured console logs.
+
+Levels:
+
+``` text
+INFO
+WARNING
+ERROR
+```
+
+Example:
+
+``` text
+[INFO] Starting MusicSync
+[INFO] Backend reachable
+[INFO] USB found: D:\
+[INFO] Scanned 42 MP3 files
+[INFO] Downloading: Daft Punk - Get Lucky
+[INFO] Download completed
+[INFO] Synchronization completed
+```
+
+Secrets must never appear in logs.
+
+------------------------------------------------------------------------
+
+## 32. Repository Pattern
+
+Database access is isolated behind repositories.
+
+Current meaningful repositories:
+
+``` text
+SongRepository
+TrackRepository
+SyncStateRepository
+```
+
+There is intentionally no:
+
+``` text
+UserRepository
+SourceRepository
+```
+
+Telegram authorization is configuration, not a persisted MusicSync user
+entity.
+
+The domain/application layer should not contain raw SQL.
+
+------------------------------------------------------------------------
+
+## 33. External Interfaces
+
+Interfaces should exist only at meaningful substitution points.
+
+Examples:
+
+``` text
+SearchProvider
+MetadataProvider
+Downloader
+BackendClient
+FileSystem
+```
+
+Possible implementations:
+
+``` text
+YouTubeSearchProvider
+SpotifySearchProvider
+YtDlpDownloader
+WindowsFileSystem
+FutureLinuxFileSystem
+```
+
+Not every class needs an interface.
+
+------------------------------------------------------------------------
+
+## 34. Error Codes
+
+Because the first synchronization API has no client secret,
+authentication-specific `401/403` client errors are not required.
+
+Useful API responses include:
+
+``` text
+200 OK
+400 Bad Request
+404 Not Found
+409 Conflict
+500 Internal Server Error
+503 Service Unavailable
+```
+
+Exact endpoint semantics belong in `API.md`.
+
+------------------------------------------------------------------------
+
+## 35. Configuration and Secrets
+
+Backend:
+
+``` text
 TELEGRAM_BOT_TOKEN
 AUTHORIZED_TELEGRAM_IDS
 YOUTUBE_API_KEY
 ```
 
-The Windows client requires configuration for:
+Optional provider credentials may be added later.
 
-```text
+Client:
+
+``` text
 BACKEND_URL
 USB_PATH
 MANAGED_FOLDER
 ```
 
-Secrets must not be stored in source control.
+There is no:
 
-The USB volume label is irrelevant; synchronization uses the configured filesystem path.
-
----
-
-# 24. Testing Architecture
-
-Important components should be testable independently from their external dependencies.
-
-Examples:
-
-```text
-Search
-  └── Fake search provider
-
-Persistence
-  └── Test repository / database
-
-Synchronization
-  └── In-memory desired and physical states
-
-Download
-  └── Fake downloader
-
-Filesystem
-  └── Temporary test directory
+``` text
+SYNC_CLIENT_SECRET
+SYNC_CLIENT_TOKEN
 ```
 
-The synchronization planner should be testable without a real USB drive.
+in the first version.
 
-External services such as Telegram and YouTube should not be required for normal automated tests.
+------------------------------------------------------------------------
 
-The concrete test organization is defined in `PROJECT_STRUCTURE.md`.
+## 36. Project Structure
 
----
+The repository should be organized approximately as:
 
-# 25. Dependency Direction
-
-Dependencies should flow from external infrastructure toward the application and domain rather than the opposite.
-
-```text
-External Services
-       │
-       ▼
-Integration / Adapters
-       │
-       ▼
-Application Logic
-       │
-       ▼
-Domain
+``` text
+MusicSync/
+├── backend/
+│   ├── src/
+│   ├── migrations/
+│   ├── tests/
+│   ├── wrangler.toml
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── client/
+│   ├── src/
+│   ├── tests/
+│   ├── pyproject.toml
+│   └── config.example.toml
+│
+├── docs/
+│   ├── design/
+│   │   ├── REQUIREMENTS.md
+│   │   ├── ARCHITECTURE.md
+│   │   ├── DATABASE.md
+│   │   └── API.md
+│   └── PROJECT_STRUCTURE.md
+│
+├── README.md
+├── LICENSE
+└── .gitignore
 ```
 
-The domain must remain independent of infrastructure.
+The exact source tree can evolve during implementation without changing
+the domain boundaries.
 
-Application logic should depend on abstractions where a meaningful substitution boundary exists.
+------------------------------------------------------------------------
 
----
+## 37. Future Linux Deployment
 
-# 26. Interfaces and Abstractions
+The filesystem boundary is deliberately isolated.
 
-Interfaces are used only where they represent meaningful architectural boundaries.
+Current:
 
-Good candidates are components that interact with:
-
-- external services;
-- persistence;
-- filesystem;
-- downloading;
-- backend communication.
-
-An interface should not be introduced merely because a class exists.
-
-The purpose of an interface is to:
-
-- isolate an external dependency;
-- make substitution possible;
-- improve testability;
-- preserve a meaningful architectural boundary.
-
-Concrete classes, interfaces and their relationships are defined in `PROJECT_STRUCTURE.md`.
-
----
-
-# 27. Maintainability Principles
-
-The implementation should favor:
-
-- small classes;
-- single clear responsibilities;
-- explicit dependencies;
-- composition over unnecessary inheritance;
-- minimal global state;
-- simple data flow;
-- dependency injection where useful;
-- abstractions only where justified.
-
-SOLID principles should guide the design without becoming a reason for unnecessary complexity.
-
----
-
-# 28. Extensibility
-
-The architecture should leave room for future additions without implementing them prematurely.
-
-Possible future extensions include:
-
-```text
-Telegram
-    │
-    └── Web UI
+``` text
+Windows
+  ↓
+WindowsFileSystem
+  ↓
+USB
 ```
 
-```text
-Windows Client
-Linux Client
-macOS Client
+Future:
+
+``` text
+Linux
+  ↓
+LinuxFileSystem
+  ↓
+USB
 ```
 
-```text
-Current Search Provider
-Future Search Provider
+The synchronization planner, domain model and application rules should
+not need to be rewritten merely because the operating system changes.
+
+A future local deployment may also place:
+
+``` text
+Backend
+Database
+Sync Client
 ```
 
-```text
-Current Downloader
-Future Downloader
-```
+on the Linux server.
 
-These possibilities should be supported through meaningful boundaries rather than speculative abstractions.
+This remains a future deployment option, not a first-version
+requirement.
 
----
+------------------------------------------------------------------------
 
-# 29. Deliberately Excluded Architecture
+## 38. Maintainability Principles
 
-The first version does not require:
+The architecture follows:
 
-- microservices;
-- message brokers;
-- Redis;
-- WebSockets;
-- event sourcing;
-- CQRS;
-- distributed locking systems;
-- complex dependency-injection frameworks;
-- background synchronization daemons;
-- Windows services;
-- GUI frameworks;
-- runtime AI;
-- a permanently running home server.
+> Design for change, not for speculation.
 
-The architecture should remain a small, understandable system composed of one online backend and one local synchronization client.
+Rules:
 
----
+-   small components;
+-   explicit dependencies;
+-   no giant service classes;
+-   no unnecessary abstractions;
+-   no framework-driven architecture;
+-   pure logic where practical;
+-   deterministic planning;
+-   clear online/local boundary;
+-   replaceable external providers where useful.
 
-# 30. Document Boundaries
+------------------------------------------------------------------------
 
-MusicSync documentation is intentionally divided by responsibility.
+## 39. Deliberately Excluded Complexity
 
-```text
-REQUIREMENTS.md
-    │
-    │ What the system must do
-    ▼
-ARCHITECTURE.md
-    │
-    │ How the system is organized
-    ▼
+The first version does not introduce:
+
+-   microservices;
+-   Kubernetes;
+-   message brokers;
+-   Redis;
+-   WebSockets;
+-   event sourcing;
+-   CQRS;
+-   distributed locks;
+-   complex dependency-injection frameworks;
+-   GUI frameworks;
+-   automatic synchronization daemons;
+-   runtime AI;
+-   multiple user roles;
+-   multiple active sync clients;
+-   a Source persistence model;
+-   a client authentication secret.
+
+------------------------------------------------------------------------
+
+## 40. Initial Implementation Order
+
+Recommended order:
+
+``` text
 DATABASE.md
-    │
-    │ How persistent data is represented
-    ▼
+      ↓
 API.md
-    │
-    │ How backend and client communicate
-    ▼
-PROJECT_STRUCTURE.md
-    │
-    │ How the architecture becomes source code
-    ▼
-Implementation
+      ↓
+backend skeleton
+      ↓
+database repositories
+      ↓
+Telegram authorization/webhook
+      ↓
+Song add/remove/list
+      ↓
+search provider + ranking
+      ↓
+YouTube URL validation
+      ↓
+sync API
+      ↓
+client BackendClient
+      ↓
+USB scanner
+      ↓
+SyncPlanner
+      ↓
+SyncExecutor
+      ↓
+yt-dlp downloader
+      ↓
+USB import
+      ↓
+integration tests
+      ↓
+packaging
 ```
 
-Each document should avoid redefining information owned by another document.
-
-`ARCHITECTURE.md` defines the boundaries and relationships.
-
-`PROJECT_STRUCTURE.md` will define the concrete classes, interfaces, files and dependencies that implement those boundaries.
+The project should not attempt to implement the entire system in one
+step.

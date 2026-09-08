@@ -1,317 +1,483 @@
-# API
+# MusicSync --- API Specification
 
-## 1. Scope
+## 1. Purpose
 
-The API is the communication layer between the online backend and the
-Windows sync client.
-
-The backend is the source of truth for the desired music library.
-
-The Windows client reads the desired state, compares it with the USB
-contents, performs the required changes, and reports the result.
-
-Telegram commands are handled internally by the backend through the
-Telegram Bot API. They are not exposed as public MusicSync API
-endpoints.
+The MusicSync API is the boundary between the online backend and
+synchronization clients.
 
 The API is intentionally small.
 
+The first version does not expose the complete backend or database.
+
+Current synchronization endpoints:
+
+``` text
+GET  /api/v1/sync/state
+POST /api/v1/sync/report
+```
+
+Telegram uses a separate webhook endpoint:
+
+``` text
+POST /telegram/webhook
+```
+
+There is no synchronization `/start` endpoint.
+
+Synchronization starts when the local client is manually launched.
+
 ------------------------------------------------------------------------
 
-## 2. Authorization
+## 2. Network Transport
 
-MusicSync does not use user accounts or client authentication.
+The API is an HTTP/REST API conceptually.
 
-Telegram is the only user-facing entry point.
+Production communication must use:
 
-Protected Telegram operations are authorized by checking the numeric
-Telegram User ID against the configured `AUTHORIZED_TELEGRAM_IDS` list.
+``` text
+HTTPS
+```
 
-The Windows client does not authenticate as a user. It only synchronizes
-the desired library exposed by the backend.
+This applies to:
 
-The synchronization API must only expose operations required by the
-Windows client.
+``` text
+Telegram → Backend
+Sync Client → Backend
+```
+
+Plain HTTP may be used only for controlled local development where
+appropriate.
+
+The API must never require plaintext HTTP in production.
 
 ------------------------------------------------------------------------
 
-## 3. Sync API
+## 3. Authentication and Authorization
 
-The initial API exposes only the endpoints required for synchronization.
+### 3.1 Telegram
 
-### 3.1 GET `/api/v1/sync/state`
+Telegram supplies the sender's numeric User ID.
 
-Returns the current desired library and synchronization version.
+MusicSync checks:
 
-Example:
+``` text
+AUTHORIZED_TELEGRAM_IDS
+```
+
+There is no MusicSync login system.
+
+Unauthorized Telegram users should be ignored without a useful response.
+
+### 3.2 Sync Client
+
+The first version has:
+
+``` text
+no SYNC_CLIENT_SECRET
+no SYNC_CLIENT_TOKEN
+```
+
+The sync client is not a user-facing account.
+
+The backend API therefore does not require a client password/secret in
+the first version.
+
+If machine authentication becomes necessary later, it can be added as a
+backward-compatible architectural extension.
+
+------------------------------------------------------------------------
+
+## 4. Telegram Webhook
+
+Endpoint:
+
+``` text
+POST /telegram/webhook
+```
+
+Telegram sends updates to the backend.
+
+Conceptual flow:
+
+``` text
+Telegram
+   ↓
+POST /telegram/webhook
+   ↓
+parse update
+   ↓
+read Telegram User ID
+   ↓
+authorization check
+   ↓
+ignore unauthorized update
+   ↓
+command handler
+```
+
+The webhook endpoint must not expose internal errors or secrets to
+Telegram users.
+
+------------------------------------------------------------------------
+
+## 5. GET /api/v1/sync/state
+
+### 5.1 Purpose
+
+Returns a complete desired-state snapshot for the sync client.
+
+The response must be sufficient for the client to plan synchronization.
+
+The response is associated with a specific:
+
+``` text
+sync_version
+```
+
+### 5.2 Conceptual response
 
 ``` json
 {
-  "sync_version": 12,
+  "sync_version": 42,
   "songs": [
     {
       "id": 1,
-      "artist": "Artist Name",
-      "title": "Song Title",
+      "artist": "Daft Punk",
+      "title": "Get Lucky",
       "version_type": "standard",
       "youtube_url": "https://www.youtube.com/watch?v=..."
+    },
+    {
+      "id": 2,
+      "artist": "Queen",
+      "title": "Don't Stop Me Now",
+      "version_type": "standard",
+      "youtube_url": null
+    }
+  ],
+  "tracks": [
+    {
+      "song_id": 1,
+      "relative_path": "Music/Daft Punk - Get Lucky.mp3"
+    },
+    {
+      "song_id": 2,
+      "relative_path": "Music/Queen - Don't Stop Me Now.mp3"
     }
   ]
 }
 ```
 
-Only active Songs are returned.
+This is a conceptual schema. The implementation must define the exact
+JSON contract and field validation.
 
-The API does not return the physical USB state.
+### 5.3 Removed Songs
 
-The response must contain enough information for the client to
-determine:
+The client needs enough information to remove obsolete managed Tracks.
 
--   which Songs should exist on the USB;
--   which YouTube URL should be downloaded;
--   the logical identity of each Song.
+Therefore the API response should either:
+
+-   include removed Songs together with their Track associations; or
+-   provide an equivalent explicit representation of removed managed
+    Tracks.
+
+The client must not be forced to infer removals from an incomplete
+response.
 
 ------------------------------------------------------------------------
 
-### 3.2 POST `/api/v1/sync/report`
+## 6. Snapshot Semantics
 
-Reports the result of a synchronization operation.
+The response from `/sync/state` represents one coherent desired-state
+snapshot.
 
-Example:
+The client records:
+
+``` text
+sync_version
+```
+
+before planning or executing synchronization.
+
+The backend must not construct a response mixing different database
+versions.
+
+The Song/Track data and `sync_version` must represent one consistent
+snapshot.
+
+------------------------------------------------------------------------
+
+## 7. Song Without YouTube URL
+
+The API may return:
 
 ``` json
 {
-  "sync_version": 12,
+  "youtube_url": null
+}
+```
+
+This is valid.
+
+It occurs when a Song was imported from the USB without a known YouTube
+source.
+
+The sync client must not silently search YouTube merely because the
+field is null.
+
+A Song with no URL cannot be downloaded until a valid source is
+supplied.
+
+The synchronization planner should report this as an unresolved download
+requirement rather than choosing an unrelated source.
+
+------------------------------------------------------------------------
+
+## 8. POST /api/v1/sync/report
+
+### 8.1 Purpose
+
+The client reports the result of a synchronization attempt.
+
+The report is associated with the version that the client synchronized.
+
+Conceptual request:
+
+``` json
+{
+  "sync_version": 42,
   "status": "success",
   "operations": [
     {
       "type": "download",
       "song_id": 1,
-      "relative_path": "Artist Name - Song Title.mp3"
+      "relative_path": "Music/Daft Punk - Get Lucky.mp3"
     },
     {
       "type": "delete",
-      "song_id": 2,
-      "relative_path": "Old Artist - Old Song.mp3"
+      "song_id": 7,
+      "relative_path": "Music/Old Song.mp3"
     },
     {
       "type": "import",
-      "song_id": 3,
-      "relative_path": "Other Artist - Other Song.mp3"
+      "song": {
+        "artist": "Queen",
+        "title": "Don't Stop Me Now",
+        "version_type": "standard",
+        "youtube_url": null
+      },
+      "relative_path": "Music/Queen - Don't Stop Me Now.mp3"
     }
   ]
 }
 ```
 
-Possible operation types:
+The exact schema is finalized during implementation.
 
--   `download` --- a desired Song was successfully downloaded.
--   `delete` --- a previously managed Track was removed.
--   `import` --- a USB file was successfully associated with a Song.
+### 8.2 Operation Types
 
-Only completed operations may be reported as successful.
+The first version supports:
 
-A failed download or incomplete operation must not be reported as
-successful.
+``` text
+download
+delete
+import
+```
+
+A synchronization may also report:
+
+``` text
+status = failed
+```
+
+when the complete operation did not succeed.
 
 ------------------------------------------------------------------------
 
-## 4. Sync Version
+## 9. Report Version Rules
 
-`sync_version` identifies a specific version of the desired library.
+Suppose:
 
-The backend increments it whenever the desired library changes.
+``` text
+client synchronized version 42
+backend current version = 43
+```
+
+The report for version 42 must not:
+
+-   change version 43 back to 42;
+-   claim that version 43 was synchronized;
+-   delete newer desired-state information.
+
+The backend may record that version 42 was processed, but the
+authoritative desired state remains version 43.
+
+A later synchronization can reconcile version 43.
+
+------------------------------------------------------------------------
+
+## 10. USB Import and Version Changes
+
+An import discovered by the client may create or modify a Song.
+
+Because that changes persistent desired-library state, the backend may
+need to increment `sync_version`.
 
 Example:
 
 ``` text
-version 10
-    ↓
-Telegram adds a Song
-    ↓
-version 11
+client synchronized desired version 42
+
+USB contains:
+Artist - New Song.mp3
+
+client reports import
+
+backend:
+42 → 43
 ```
 
-The client reports the version it synchronized.
+The backend must apply this mutation transactionally.
 
-If the library changes during synchronization:
-
-``` text
-Client fetches version 12
-        ↓
-User adds a Song through Telegram
-        ↓
-Backend becomes version 13
-        ↓
-Client reports version 12
-```
-
-The backend must not treat this as synchronization of version 13.
-
-The newer desired state remains authoritative and will be synchronized
-on a later client run.
+The import report must not blindly force the database back to the
+client's older version.
 
 ------------------------------------------------------------------------
 
-## 5. YouTube URL Validation
+## 11. Idempotency
 
-Direct YouTube URLs are validated by the backend before they can be
-processed or stored.
+The client may retry a report after a network failure.
 
-Validation must verify that the URL belongs to a supported YouTube
-domain and uses a supported YouTube URL format.
+The backend should make report processing sufficiently idempotent to
+avoid creating duplicate Songs or Tracks.
 
-At minimum, the first version should support:
+The exact idempotency strategy can be implemented through:
+
+-   database uniqueness constraints;
+-   checking Song identity;
+-   checking relative path;
+-   operation identifiers if later required.
+
+A full distributed job system is not required.
+
+------------------------------------------------------------------------
+
+## 12. API Errors
+
+The first version does not require machine-authentication errors.
+
+Expected responses include:
+
+### `200 OK`
+
+Request completed successfully.
+
+### `400 Bad Request`
+
+Malformed or invalid request.
+
+Examples:
+
+-   invalid JSON;
+-   missing required field;
+-   invalid operation type;
+-   invalid sync version.
+
+### `404 Not Found`
+
+Requested resource or route does not exist.
+
+### `409 Conflict`
+
+The requested operation conflicts with current persistent state.
+
+Examples:
+
+-   impossible Track association;
+-   conflicting identity/path;
+-   invalid state transition.
+
+### `500 Internal Server Error`
+
+Unexpected backend failure.
+
+### `503 Service Unavailable`
+
+Backend dependency is temporarily unavailable.
+
+------------------------------------------------------------------------
+
+## 13. URL Validation
+
+Any endpoint or application flow accepting a YouTube URL must validate
+it structurally.
+
+Accepted hosts include at minimum:
 
 ``` text
-https://www.youtube.com/watch?v=...
-https://youtube.com/watch?v=...
-https://youtu.be/...
+www.youtube.com
+youtube.com
+youtu.be
 ```
 
-Lookalike or unrelated domains must be rejected.
-
-For example:
+The implementation must reject lookalike hosts such as:
 
 ``` text
-https://youtube.com.evil.example/...
-https://evil.example/youtube.com/...
+youtube.com.evil.example
+evil.example/youtube.com/...
 ```
 
-must not be accepted.
-
-Validation happens before metadata retrieval and before persistence.
-
-The exact URL supplied by the user is preserved after confirmation.
+Validation must happen before metadata retrieval or persistence.
 
 `/force` does not bypass URL validation.
 
 ------------------------------------------------------------------------
 
-## 6. Direct YouTube URL Flow
+## 14. API and Filesystem Boundaries
 
-The flow is:
+The backend must never receive arbitrary filesystem paths as commands to
+execute.
+
+The client determines local paths from:
 
 ``` text
-User provides URL
-       ↓
-Validate YouTube URL
-       ↓
-Retrieve metadata
-       ↓
-Normalize metadata
-       ↓
-Duplicate check
-       ↓
-Ask for confirmation
-       ↓
-Save exact supplied URL
+USB_PATH
+MANAGED_FOLDER
+relative_path
 ```
 
-If validation fails, the URL is rejected.
+The backend only communicates logical relative paths that belong to the
+managed folder.
 
-If the source is unavailable or unsuitable, the user is informed.
-
-The system must never silently replace the supplied URL with another
-upload.
+The client validates paths before filesystem operations.
 
 ------------------------------------------------------------------------
 
-## 7. Telegram ↔ Backend
+## 15. API and Sync Safety
 
-Telegram is the user interface for library management.
+The client must not perform destructive operations if:
 
-The backend handles:
+-   `/sync/state` cannot be fetched completely;
+-   the response is invalid;
+-   the USB is unavailable;
+-   the client cannot establish the state snapshot;
+-   the application cannot safely determine managed-file ownership.
 
--   Telegram authorization;
--   search;
--   search result selection;
--   direct YouTube URLs;
--   duplicate detection;
--   add;
--   remove;
--   list;
--   force-add.
-
-The backend stores the desired library directly in the database.
-
-A Telegram operation that changes the desired library increments
-`sync_version`.
+The API is designed so the client can fail safely.
 
 ------------------------------------------------------------------------
 
-## 8. Error Handling
+## 16. Future Extensions
 
-The API uses JSON for request and response bodies.
+The API should remain extensible for future:
 
-Relevant HTTP status codes include:
+-   machine authentication;
+-   additional sync clients;
+-   local backend deployment;
+-   Web UI;
+-   richer synchronization reporting;
+-   synchronization history.
 
--   `200 OK` --- successful request.
--   `400 Bad Request` --- invalid request.
--   `404 Not Found` --- requested resource does not exist.
--   `409 Conflict` --- synchronization state conflict.
--   `500 Internal Server Error` --- unexpected backend error.
--   `503 Service Unavailable` --- backend temporarily unavailable.
+These are not part of the first API contract.
 
-Example:
-
-``` json
-{
-  "error": "invalid_request",
-  "message": "The synchronization report is invalid."
-}
-```
-
-Clients should not depend on the exact error message text.
-
-------------------------------------------------------------------------
-
-## 9. Failure Safety
-
-If the backend is unavailable, the Windows client must not perform
-destructive synchronization based on stale or incomplete desired state.
-
-If the USB is unavailable, no filesystem operation is performed.
-
-If a report cannot be sent after physical operations completed, the next
-synchronization must reconcile the actual USB contents with the current
-desired state.
-
-Incomplete downloads must not count as completed Tracks.
-
-------------------------------------------------------------------------
-
-## 10. Security Rules
-
--   All network communication uses HTTPS.
--   Telegram authorization is based on numeric Telegram User IDs.
--   Only configured Telegram User IDs may modify the library.
--   YouTube URLs must pass backend validation before processing or
-    persistence.
--   The Windows client must never download an arbitrary URL supplied
-    directly by a user.
--   Only YouTube URLs stored in the backend database may be used as
-    download sources.
--   Filesystem operations remain restricted to the configured managed
-    folder.
--   Secrets such as the Telegram bot token and YouTube API key are never
-    committed to source control.
--   The backend never accesses the physical USB filesystem.
-
-------------------------------------------------------------------------
-
-## 11. Design Constraints
-
-The API intentionally does not provide:
-
--   a generic CRUD API for Songs;
--   a users API;
--   a sources API;
--   a tracks API;
--   WebSockets;
--   background synchronization;
--   queues;
--   a complex authentication system.
-
-The API exists only to connect the online desired state with the
-manually executed Windows synchronization client.
+The first API should remain small.

@@ -1,113 +1,66 @@
-# MusicSync — Database
+# MusicSync --- Database Specification
 
-## 1. Scopo
+## 1. Purpose
 
-Il database rappresenta la **libreria musicale desiderata**.
+The database stores the persistent information required to manage
+MusicSync's desired music library and coordinate synchronization.
 
-Non rappresenta una copia dello stato fisico della USB.
+The database is **not** a complete representation of the USB filesystem.
 
-```text
-Database
-   ↓
-cosa vogliamo nella libreria
+The USB is scanned by the sync client during synchronization.
 
-USB
-   ↓
-cosa esiste fisicamente
+The database stores:
 
-Windows Client
-   ↓
-confronta e sincronizza
-```
+-   logical Songs;
+-   managed Track-to-Song associations;
+-   global synchronization metadata.
 
-Il database utilizza **Cloudflare D1 (SQLite)**.
+The first version contains exactly three tables:
 
----
-
-# 2. Entità
-
-MusicSync utilizza due entità principali:
-
-```text
-Song
- │
- └── Track
-```
-
-### Song
-
-Rappresenta una canzone nella libreria.
-
-Esempio:
-
-```text
-Artist: "Lady Gaga & Bruno Mars"
-Title:  "Die With A Smile"
-```
-
-Un duetto o una collaborazione tra più artisti è **una singola Song**.
-
-### Track
-
-Rappresenta il file MP3 fisico associato alla Song sulla USB.
-
-Esempio:
-
-```text
-Music/Lady Gaga & Bruno Mars - Die With A Smile.mp3
-```
-
----
-
-# 3. Candidate di ricerca
-
-Le candidate ottenute durante una ricerca sono **temporanee**.
-
-Esempio:
-
-```text
-Ricerca
-   ↓
-3 candidate YouTube
-   ↓
-utente sceglie
-   ↓
-solo quella scelta viene salvata
-```
-
-Le candidate non confermate non vengono mai inserite nel database.
-
-Il database contiene solamente la Song che l'utente ha effettivamente scelto.
-
----
-
-# 4. Tabelle
-
-Il database contiene solamente:
-
-```text
+``` text
 songs
 tracks
 sync_state
 ```
 
-Non sono necessarie tabelle per:
+There are deliberately no:
 
-- utenti Telegram;
-- candidate di ricerca;
-- sorgenti YouTube alternative;
-- stato completo della USB;
-- storico delle sincronizzazioni.
+``` text
+users
+sources
+sync_clients
+```
 
-Gli ID Telegram autorizzati sono configurazione del backend, non dati del database.
+tables.
 
----
+------------------------------------------------------------------------
 
-# 5. `songs`
+## 2. Design Principles
 
-Contiene le Song della libreria desiderata.
+The database should remain small.
 
-```sql
+It should represent stable application state rather than continuously
+mirror physical USB state.
+
+In particular:
+
+-   a Song may exist without a known YouTube URL;
+-   a Track represents a managed physical association, not a live
+    filesystem status;
+-   the database must not contain a `missing` Track state;
+-   synchronization state is global in the first version;
+-   soft removal is used for Songs so existing Track paths remain
+    available during reconciliation.
+
+------------------------------------------------------------------------
+
+## 3. `songs`
+
+A Song represents a logical music item in the desired library.
+
+### 3.1 Schema
+
+``` sql
 CREATE TABLE songs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
 
@@ -118,22 +71,18 @@ CREATE TABLE songs (
     normalized_title TEXT NOT NULL,
 
     version_type TEXT NOT NULL DEFAULT 'standard'
-        CHECK (
-            version_type IN (
-                'standard',
-                'cover',
-                'remix',
-                'acoustic',
-                'live'
-            )
-        ),
+        CHECK (version_type IN (
+            'standard',
+            'cover',
+            'remix',
+            'acoustic',
+            'live'
+        )),
 
-    youtube_url TEXT NOT NULL,
+    youtube_url TEXT,
 
     status TEXT NOT NULL DEFAULT 'active'
-        CHECK (
-            status IN ('active', 'removed')
-        ),
+        CHECK (status IN ('active', 'removed')),
 
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -146,28 +95,59 @@ CREATE TABLE songs (
 );
 ```
 
-## Campi
+### 3.2 YouTube URL may be NULL
 
-| Campo | Significato |
-|---|---|
-| `id` | Identificatore interno |
-| `artist` | Artista mostrato all'utente |
-| `title` | Titolo mostrato all'utente |
-| `normalized_artist` | Artista normalizzato per i confronti |
-| `normalized_title` | Titolo normalizzato per i confronti |
-| `version_type` | Tipo di versione |
-| `youtube_url` | URL YouTube definitivo scelto dall'utente |
-| `status` | Stato logico della Song |
-| `created_at` | Data di creazione |
-| `updated_at` | Ultima modifica |
+This is intentional.
 
----
+A Song imported from an existing USB file may be known as:
 
-# 6. Identità della Song
+``` text
+Artist: Pink Floyd
+Title: Time
+Version: standard
+```
 
-L'identità logica di una Song è:
+while the YouTube source is unknown.
 
-```text
+In that case:
+
+``` text
+youtube_url = NULL
+```
+
+is valid.
+
+MusicSync must not search YouTube merely to fill this field during
+import.
+
+The URL can be added later when the Song needs a downloadable source.
+
+### 3.3 Exact URL uniqueness
+
+The same YouTube URL should normally not represent two different Song
+records.
+
+SQLite's normal `UNIQUE` behavior allows multiple `NULL` values, which
+is desirable here.
+
+To enforce uniqueness for non-null URLs, the schema should also use:
+
+``` sql
+CREATE UNIQUE INDEX idx_songs_youtube_url_unique
+ON songs(youtube_url)
+WHERE youtube_url IS NOT NULL;
+```
+
+This prevents the exact same source URL from being persisted twice while
+still allowing imported Songs with no URL.
+
+------------------------------------------------------------------------
+
+## 4. Song Identity
+
+The primary logical identity is:
+
+``` text
 normalized_artist
 +
 normalized_title
@@ -175,143 +155,64 @@ normalized_title
 version_type
 ```
 
-Questa combinazione è unica.
+For example:
 
-Per esempio:
-
-```text
-Lady Gaga & Bruno Mars
-Die With A Smile
+``` text
+The Beatles
+Let It Be
 standard
 ```
 
-rappresenta una sola Song.
+and:
 
-La normalizzazione può gestire:
-
-- maiuscole/minuscole;
-- accenti;
-- punteggiatura;
-- spazi;
-- suffissi irrilevanti come `Official Video`, `Lyrics`, `Audio`.
-
-Non deve eliminare differenze significative come:
-
-```text
-Remix
-Acoustic
-Cover
-Live
-```
-
----
-
-# 7. Artisti multipli
-
-Gli artisti vengono memorizzati come una singola stringa.
-
-Esempio:
-
-```text
-artist = "Lady Gaga & Bruno Mars"
-```
-
-Non viene creata una tabella separata `artists`.
-
-Non vengono create più Song per un duetto.
-
-Quindi:
-
-```text
-Lady Gaga & Bruno Mars - Die With A Smile
-```
-
-è una sola Song.
-
----
-
-# 8. Versioni
-
-Le versioni musicalmente distinte vengono considerate Song differenti.
-
-Sono supportate:
-
-```text
-standard
-cover
-remix
+``` text
+The Beatles
+Let It Be
 acoustic
-live
 ```
 
-Esempio:
+are distinct Songs.
 
-```text
-Artist - Song
-Artist - Song (Remix)
-Artist - Song (Acoustic)
-Artist - Song (Live)
-```
+The original display values remain untouched.
 
-possono essere Song diverse.
+Normalization exists for comparison and duplicate detection only.
 
-Una `Radio Edit`, invece, viene considerata la stessa Song della versione standard salvo diversa richiesta esplicita.
+------------------------------------------------------------------------
 
----
+## 5. Song Status
 
-# 9. YouTube URL
+Songs use:
 
-Ogni Song ha una sola `youtube_url` definitiva.
-
-Il flusso è:
-
-```text
-Ricerca YouTube
-      ↓
-candidate
-      ↓
-utente sceglie
-      ↓
-youtube_url salvato nella Song
-```
-
-Le altre candidate vengono scartate.
-
-L'URL confermato dall'utente viene conservato senza sostituirlo automaticamente con un altro video.
-
-Anche quando l'utente fornisce direttamente un URL YouTube, quello specifico URL viene utilizzato dopo la conferma.
-
----
-
-# 10. Rimozione delle Song
-
-Quando l'utente esegue `/remove`, la Song viene marcata:
-
-```text
-status = 'removed'
-```
-
-Non è necessario cancellarla immediatamente dal database.
-
-Questo permette al client Windows di riconoscere che l'eventuale Track associata deve essere rimossa dalla USB durante la sincronizzazione successiva.
-
-Se la stessa Song viene aggiunta nuovamente, il record esistente può essere riattivato:
-
-```text
-removed
-   ↓
+``` text
 active
+removed
 ```
 
-senza creare un duplicato.
+### `active`
 
----
+The Song belongs to the desired library.
 
-# 11. `tracks`
+### `removed`
 
-Rappresenta i file fisici gestiti da MusicSync sulla USB.
+The Song no longer belongs to the desired library, but its persistent
+record remains temporarily available for synchronization/reconciliation.
 
-```sql
+A removed Song must not appear in normal `/list` results.
+
+The record should not be hard-deleted automatically while an associated
+managed Track may still exist.
+
+Hard deletion, if ever introduced, is a separate maintenance concern.
+
+------------------------------------------------------------------------
+
+## 6. `tracks`
+
+A Track represents a physical MP3 path managed by MusicSync.
+
+### 6.1 Schema
+
+``` sql
 CREATE TABLE tracks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
 
@@ -328,109 +229,89 @@ CREATE TABLE tracks (
 );
 ```
 
-Una Track contiene solamente le informazioni necessarie per associare un file fisico a una Song.
+### 6.2 Why Track exists
 
----
+The sync client needs to distinguish:
 
-# 12. Percorso della Track
-
-Il database memorizza solamente un percorso **relativo alla cartella gestita**.
-
-Esempio:
-
-```text
-Artist - Title.mp3
+``` text
+Music/
+└── Artist - Song.mp3
 ```
 
-oppure:
+that MusicSync already manages from an arbitrary MP3 manually placed on
+the USB.
 
-```text
-subfolder/Artist - Title.mp3
-```
+The persistent association is:
 
-Non vengono mai memorizzati percorsi assoluti come:
-
-```text
-D:\Music\Artist - Title.mp3
-```
-
-Il percorso della USB è configurazione locale del Windows Client.
-
----
-
-# 13. Nessuno stato `missing`
-
-Il database **non memorizza lo stato fisico corrente della USB**.
-
-Se il database contiene:
-
-```text
-Song A
-Track A
-```
-
-ma il file viene eliminato manualmente dalla USB, il database non viene modificato immediatamente.
-
-Alla sincronizzazione successiva:
-
-```text
-Database
-    +
-Scansione USB
-    ↓
-file assente
-    ↓
-DOWNLOAD
-```
-
-Il client ricava quindi lo stato fisico direttamente dalla USB ogni volta.
-
----
-
-# 14. File presenti sulla USB ma non nel database
-
-Durante la sincronizzazione il client può trovare un MP3 che non corrisponde a una Track conosciuta.
-
-Esempio:
-
-```text
-DB:
-A
-B
-
-USB:
-A
-B
-C
-```
-
-Il client tenta di identificare `C`.
-
-Se riesce:
-
-```text
-C
- ↓
+``` text
 Song
- ↓
-Track
- ↓
-Database
+  ↕
+relative_path
 ```
 
-Il file rimane sulla USB.
+The Track table therefore stores only the information required for this
+association.
 
-Se non riesce a identificarlo con sufficiente sicurezza, il file viene lasciato intatto.
+### 6.3 What Track does NOT store
 
-MusicSync non deve cancellare automaticamente file che non riesce a riconoscere.
+Track does not contain:
 
----
+-   absolute Windows path;
+-   USB volume name;
+-   USB serial number;
+-   `missing` state;
+-   download status;
+-   YouTube URL;
+-   source ID;
+-   physical checksum;
+-   current filesystem existence.
 
-# 15. `sync_state`
+The current filesystem state is discovered by scanning the USB.
 
-Contiene solamente lo stato necessario per coordinare le sincronizzazioni.
+------------------------------------------------------------------------
 
-```sql
+## 7. Track and Song Relationship
+
+The intended relationship is:
+
+``` text
+Song
+  │
+  └── Track
+```
+
+In the first version, a Song is normally represented by at most one
+managed Track.
+
+If this invariant is adopted, it should be enforced with:
+
+``` sql
+CREATE UNIQUE INDEX idx_tracks_song_unique
+ON tracks(song_id);
+```
+
+This keeps the physical representation simple:
+
+``` text
+one Song
+    ↕
+one managed MP3
+```
+
+If future requirements introduce multiple physical copies, that
+constraint can be removed in a deliberate schema migration.
+
+------------------------------------------------------------------------
+
+## 8. `sync_state`
+
+The first version assumes one active synchronization client.
+
+Therefore synchronization state is a singleton.
+
+### 8.1 Schema
+
+``` sql
 CREATE TABLE sync_state (
     id INTEGER PRIMARY KEY CHECK (id = 1),
 
@@ -444,219 +325,476 @@ CREATE TABLE sync_state (
     last_sync_status TEXT
         CHECK (
             last_sync_status IS NULL
-            OR last_sync_status IN (
-                'success',
-                'failed'
-            )
+            OR last_sync_status IN ('success', 'failed')
         )
 );
 ```
 
-La tabella contiene una sola riga:
+The initial migration inserts:
 
-```text
-id = 1
-```
-
----
-
-# 16. `sync_version`
-
-`sync_version` identifica la versione della libreria desiderata.
-
-Esempio:
-
-```text
-version 10
-```
-
-L'utente aggiunge una Song:
-
-```text
-version 11
-```
-
-L'utente rimuove una Song:
-
-```text
-version 12
-```
-
-Il Windows Client comunica quale versione ha sincronizzato.
-
-Questo permette al backend di sapere se il client ha lavorato su una versione ormai vecchia della libreria.
-
----
-
-# 17. Quando aumenta `sync_version`
-
-La versione aumenta quando cambia la libreria desiderata.
-
-Per esempio:
-
-```text
-/add
-/remove
-riattivazione di una Song
-cambio della URL YouTube definitiva
-```
-
-La semplice lettura della libreria non modifica la versione.
-
----
-
-# 18. Indici
-
-Le constraint `UNIQUE` creano già gli indici necessari per:
-
-```text
-songs(
-    normalized_artist,
-    normalized_title,
-    version_type
+``` sql
+INSERT INTO sync_state (
+    id,
+    sync_version,
+    last_sync_started_at,
+    last_sync_completed_at,
+    last_sync_status
 )
-
-tracks(relative_path)
+VALUES (
+    1,
+    0,
+    NULL,
+    NULL,
+    NULL
+);
 ```
 
-Aggiungiamo inoltre:
+### 8.2 Meaning
 
-```sql
+`sync_version` is the version of the desired library.
+
+Every desired-library mutation increments it.
+
+Example:
+
+``` text
+0
+ ↓ add
+1
+ ↓ add
+2
+ ↓ remove
+3
+```
+
+`last_sync_started_at`, `last_sync_completed_at` and `last_sync_status`
+are operational metadata.
+
+They do not replace the version number.
+
+------------------------------------------------------------------------
+
+## 9. Why There Is No `client_id`
+
+The first release assumes:
+
+``` text
+one active sync client
+```
+
+The system does not need:
+
+``` text
+client_id
+```
+
+in the database.
+
+If multiple independent clients become a real requirement later, that
+can be introduced with an explicit schema and synchronization design.
+
+It is not needed now.
+
+------------------------------------------------------------------------
+
+## 10. Why There Is No `missing` Track State
+
+The database must not try to continuously mirror the USB.
+
+Suppose:
+
+``` text
+Track:
+Music/Queen - Radio Ga Ga.mp3
+```
+
+The file is manually deleted from the USB.
+
+The database does not immediately become:
+
+``` text
+status = missing
+```
+
+Instead, the next synchronization scans the USB and discovers:
+
+``` text
+physical file absent
+```
+
+The planner then decides what to do.
+
+This avoids stale physical state in the database.
+
+------------------------------------------------------------------------
+
+## 11. Existing USB Music
+
+An existing USB track can be imported into a database that is:
+
+-   empty;
+-   partially populated;
+-   already populated.
+
+Example:
+
+``` text
+USB:
+Music/
+└── Queen - Don't Stop Me Now.mp3
+```
+
+The client may create:
+
+``` text
+songs:
+artist = Queen
+title = Don't Stop Me Now
+youtube_url = NULL
+status = active
+```
+
+and:
+
+``` text
+tracks:
+song_id = ...
+relative_path = Music/Queen - Don't Stop Me Now.mp3
+```
+
+No YouTube search is required.
+
+------------------------------------------------------------------------
+
+## 12. Import Does Not Require a URL
+
+This is an explicit invariant:
+
+``` text
+USB import
+    ≠
+YouTube discovery
+```
+
+The client should not waste API requests trying to discover a YouTube
+URL for every existing MP3.
+
+A later operation may populate the URL if the Song needs to be
+downloaded or otherwise linked to a source.
+
+------------------------------------------------------------------------
+
+## 13. Removed Songs and Tracks
+
+Suppose:
+
+``` text
+songs:
+id = 10
+status = removed
+```
+
+and:
+
+``` text
+tracks:
+song_id = 10
+relative_path = Music/Artist - Song.mp3
+```
+
+The Track remains until the synchronization process safely removes the
+physical file.
+
+After successful physical reconciliation, the Track may be deleted.
+
+The Song may remain as historical/soft-deleted metadata.
+
+This prevents the backend from losing the path needed to clean the USB.
+
+------------------------------------------------------------------------
+
+## 14. Database Constraints
+
+The database should enforce stable invariants:
+
+``` text
+songs logical identity UNIQUE
+
+non-null songs.youtube_url UNIQUE
+
+tracks.relative_path UNIQUE
+
+tracks.song_id → songs.id
+
+sync_state.id = 1
+```
+
+Potential additional invariant:
+
+``` text
+tracks.song_id UNIQUE
+```
+
+if the first version guarantees one managed physical track per Song.
+
+------------------------------------------------------------------------
+
+## 15. Indexes
+
+Recommended indexes:
+
+``` sql
 CREATE INDEX idx_tracks_song_id
 ON tracks(song_id);
 ```
 
----
+The unique indexes described above also provide lookup support.
 
-# 19. Migrazione iniziale
+Depending on query patterns, additional indexes can be introduced later
+rather than speculatively.
 
-File:
+------------------------------------------------------------------------
 
-```text
+## 16. Initial Migration
+
+The first migration should be:
+
+``` text
 backend/migrations/0001_initial.sql
 ```
 
-Contenuto:
+Conceptually:
 
-```sql
+``` sql
 PRAGMA foreign_keys = ON;
 
 CREATE TABLE songs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-    artist TEXT NOT NULL,
-    title TEXT NOT NULL,
-
-    normalized_artist TEXT NOT NULL,
-    normalized_title TEXT NOT NULL,
-
-    version_type TEXT NOT NULL DEFAULT 'standard'
-        CHECK (
-            version_type IN (
-                'standard',
-                'cover',
-                'remix',
-                'acoustic',
-                'live'
-            )
-        ),
-
-    youtube_url TEXT NOT NULL,
-
-    status TEXT NOT NULL DEFAULT 'active'
-        CHECK (
-            status IN ('active', 'removed')
-        ),
-
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-
-    UNIQUE (
-        normalized_artist,
-        normalized_title,
-        version_type
-    )
+    ...
 );
+
+CREATE UNIQUE INDEX idx_songs_youtube_url_unique
+ON songs(youtube_url)
+WHERE youtube_url IS NOT NULL;
 
 CREATE TABLE tracks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-    song_id INTEGER NOT NULL,
-
-    relative_path TEXT NOT NULL UNIQUE,
-
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-
-    FOREIGN KEY (song_id)
-        REFERENCES songs(id)
-        ON DELETE RESTRICT
-);
-
-CREATE TABLE sync_state (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-
-    sync_version INTEGER NOT NULL DEFAULT 0,
-
-    last_sync_started_at TEXT,
-
-    last_sync_completed_at TEXT,
-
-    last_sync_status TEXT
-        CHECK (
-            last_sync_status IS NULL
-            OR last_sync_status IN (
-                'success',
-                'failed'
-            )
-        )
+    ...
 );
 
 CREATE INDEX idx_tracks_song_id
 ON tracks(song_id);
 
-INSERT INTO sync_state (id, sync_version)
-VALUES (1, 0);
+CREATE UNIQUE INDEX idx_tracks_song_unique
+ON tracks(song_id);
+
+CREATE TABLE sync_state (
+    ...
+);
+
+INSERT INTO sync_state (...);
 ```
 
----
+The exact migration should be treated as the authoritative executable
+schema.
 
-# 20. Regola fondamentale
+------------------------------------------------------------------------
 
-Il modello del database è volutamente semplice:
+## 17. Timestamps
 
-```text
-┌──────────────────────┐
-│      DATABASE        │
-│                      │
-│ Song                 │
-│   └── YouTube URL    │
-│                      │
-│ Track                │
-│   └── USB path       │
-│                      │
-│ sync_version         │
-└──────────┬───────────┘
-           │
-           │ desired state
-           ▼
-┌──────────────────────┐
-│   WINDOWS CLIENT     │
-│                      │
-│ confronta DB + USB   │
-│ e applica il piano   │
-└──────────┬───────────┘
-           │
-           ▼
-┌──────────────────────┐
-│         USB          │
-│                      │
-│ stato fisico reale   │
-└──────────────────────┘
+Timestamps are stored as text in a consistent machine-readable format.
+
+The application should generate timestamps consistently, preferably
+using UTC.
+
+The database should not depend on local Windows timezone behavior.
+
+------------------------------------------------------------------------
+
+## 18. Transactions
+
+Operations that mutate desired library state and `sync_version` must be
+transactional.
+
+For example:
+
+``` text
+BEGIN
+    update Song
+    increment sync_version
+COMMIT
 ```
 
-**Il database dice cosa vogliamo.**
+If the transaction fails:
 
-**La USB dice cosa abbiamo.**
+``` text
+ROLLBACK
+```
 
-**Il client confronta le due cose e le allinea.**
+The database must not contain a Song mutation without the corresponding
+version update.
+
+The same principle applies to removal.
+
+------------------------------------------------------------------------
+
+## 19. Import Transactions
+
+A successful USB import may require:
+
+``` text
+create/update Song
+create Track
+increment sync_version
+```
+
+These database mutations should be performed transactionally.
+
+If the import cannot be persisted, the physical file must not be treated
+as successfully imported.
+
+The file remains on the USB.
+
+------------------------------------------------------------------------
+
+## 20. Database and Physical State
+
+The database does not guarantee that:
+
+``` text
+Track row exists
+```
+
+means:
+
+``` text
+file currently exists
+```
+
+That fact is intentionally determined by the sync client.
+
+The database describes managed relationships and desired state.
+
+The USB scan describes physical reality.
+
+------------------------------------------------------------------------
+
+## 21. No User Table
+
+Telegram authorization is configuration:
+
+``` text
+AUTHORIZED_TELEGRAM_IDS
+```
+
+There is no:
+
+``` text
+users
+```
+
+table.
+
+This avoids creating an unnecessary account system.
+
+If a future web interface needs accounts, authentication can be
+introduced as a separate future feature.
+
+------------------------------------------------------------------------
+
+## 22. No Source Table
+
+The first version stores:
+
+``` text
+youtube_url
+```
+
+directly on Song.
+
+There is no:
+
+``` text
+sources
+source_id
+SourceRepository
+```
+
+This is intentional.
+
+If future requirements require multiple simultaneous sources per Song,
+that change should be introduced deliberately rather than anticipated
+through unnecessary tables now.
+
+------------------------------------------------------------------------
+
+## 23. Migration Strategy
+
+Schema changes must be performed through numbered migrations.
+
+Example:
+
+``` text
+0001_initial.sql
+0002_add_x.sql
+0003_change_y.sql
+```
+
+Existing data must be preserved whenever practical.
+
+Migrations should be small and independently understandable.
+
+------------------------------------------------------------------------
+
+## 24. Development Data
+
+Development/test data may include:
+
+-   Songs with URLs;
+-   Songs with `youtube_url = NULL`;
+-   active Songs;
+-   removed Songs;
+-   Tracks;
+-   sync versions.
+
+Development data must never contain real secrets.
+
+------------------------------------------------------------------------
+
+## 25. Database Invariants Summary
+
+The first version must maintain these invariants:
+
+1.  every Track references an existing Song;
+2.  every Track path is unique;
+3.  every non-null YouTube URL is unique;
+4.  logical Song identity is unique;
+5.  `sync_state` contains exactly one row;
+6.  `sync_state.id = 1`;
+7.  `sync_version >= 0`;
+8.  a Song may have no YouTube URL;
+9.  the database does not represent live USB existence;
+10. removed Songs remain available long enough to reconcile managed
+    Tracks;
+11. no user/source/client tables are required.
+
+------------------------------------------------------------------------
+
+## 26. Relationship to Other Documents
+
+This document defines the persistence model.
+
+It does not define:
+
+-   Telegram command behavior;
+-   HTTP endpoint details;
+-   search ranking algorithms;
+-   filesystem implementation;
+-   project source layout.
+
+Those belong respectively to:
+
+``` text
+REQUIREMENTS.md
+ARCHITECTURE.md
+API.md
+PROJECT_STRUCTURE.md
+```
