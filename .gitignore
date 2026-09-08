@@ -1,0 +1,27 @@
+# Environment / secrets
+.env
+.env.local
+*.local
+secrets.json
+secrets.*
+config.py
+config.json
+config.local.json
+
+# Local D1 databases (backend)
+d1.json
+data/
+.migrations/
+
+# Local node
+node_modules/
+
+# Python (Windows client)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Editors / OS
+.DS_Store
+Thumbs.db
