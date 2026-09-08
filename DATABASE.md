@@ -202,7 +202,25 @@ A removed Song must not appear in normal `/list` results.
 The record should not be hard-deleted automatically while an associated
 managed Track may still exist.
 
-Hard deletion, if ever introduced, is a separate maintenance concern.
+### 5.1 Reactivation via Logical UPSERT
+
+Because the uniqueness constraint:
+
+``` sql
+UNIQUE (normalized_artist, normalized_title, version_type)
+```
+
+is enforced globally across all songs, attempting to re-add a previously
+removed song would fail if treated as a naive `INSERT`.
+
+MusicSync explicitly treats re-adding a song as a logical reactivation:
+- The system checks for an existing record by normalized artist, title,
+  and version_type.
+- If a record exists with `status = 'removed'`, the system updates it
+  to `status = 'active'`, updates `youtube_url` (if a new URL is
+  provided), refreshes `updated_at`, and increments `sync_version`.
+- No duplicate song record is created, preserving identity and historical
+  referential integrity.
 
 ------------------------------------------------------------------------
 
@@ -234,12 +252,16 @@ CREATE TABLE tracks (
 The sync client needs to distinguish:
 
 ``` text
-Music/
+D:\Music\
 └── Artist - Song.mp3
 ```
 
 that MusicSync already manages from an arbitrary MP3 manually placed on
 the USB.
+
+`relative_path` is strictly relative to `MANAGED_FOLDER` (e.g.
+`Artist - Song.mp3` or `Subfolder/Artist - Song.mp3`), NEVER prefixed
+with the managed folder name itself.
 
 The persistent association is:
 
@@ -459,7 +481,7 @@ and:
 ``` text
 tracks:
 song_id = ...
-relative_path = Music/Queen - Don't Stop Me Now.mp3
+relative_path = Queen - Don't Stop Me Now.mp3
 ```
 
 No YouTube search is required.
@@ -484,7 +506,7 @@ downloaded or otherwise linked to a source.
 
 ------------------------------------------------------------------------
 
-## 13. Removed Songs and Tracks
+## 13. Removed Songs and Tracks Lifecycle
 
 Suppose:
 
@@ -498,18 +520,34 @@ and:
 
 ``` text
 tracks:
+id = 25
 song_id = 10
-relative_path = Music/Artist - Song.mp3
+relative_path = Artist - Song.mp3
 ```
 
-The Track remains until the synchronization process safely removes the
-physical file.
+Lifecycle rules:
+1. **User requests removal (`/remove`):**
+   - `songs.status` is set to `'removed'`.
+   - The associated record in `tracks` remains untouched so that the
+     client knows which `relative_path` to delete from the physical USB.
+   - `sync_version` is incremented.
 
-After successful physical reconciliation, the Track may be deleted.
+2. **Client executes sync report (`POST /api/v1/sync/report` with delete):**
+   - The client physically removes the file from the USB and includes
+     the deletion in its report.
+   - Upon acknowledging physical deletion, the backend safely deletes the
+     `tracks` record:
+     ```sql
+     DELETE FROM tracks WHERE id = 25;
+     ```
+   - The record in `songs` (with `status = 'removed'`) **is preserved**
+     in the database as soft-deleted metadata.
 
-The Song may remain as historical/soft-deleted metadata.
-
-This prevents the backend from losing the path needed to clean the USB.
+Preserving `songs` records:
+- Consumes negligible space (<100 bytes).
+- Preserves referential consistency and historical logs.
+- Enables seamless reactivation via logical UPSERT if the user re-adds
+  the song in the future.
 
 ------------------------------------------------------------------------
 
@@ -580,9 +618,6 @@ CREATE TABLE tracks (
     ...
 );
 
-CREATE INDEX idx_tracks_song_id
-ON tracks(song_id);
-
 CREATE UNIQUE INDEX idx_tracks_song_unique
 ON tracks(song_id);
 
@@ -594,39 +629,49 @@ INSERT INTO sync_state (...);
 ```
 
 The exact migration should be treated as the authoritative executable
-schema.
+schema. Notice that `idx_tracks_song_unique` already covers index lookups
+for `song_id`, so no redundant non-unique index is created.
 
 ------------------------------------------------------------------------
 
 ## 17. Timestamps
 
-Timestamps are stored as text in a consistent machine-readable format.
+Timestamps are stored as text in ISO 8601 UTC format:
 
-The application should generate timestamps consistently, preferably
-using UTC.
+``` text
+YYYY-MM-DDTHH:MM:SS.SSSZ
+```
 
-The database should not depend on local Windows timezone behavior.
+Example:
+
+``` text
+2026-09-08T14:30:00.000Z
+```
+
+Storing UTC ISO 8601 strings ensures correct lexicographical ordering in
+SQLite and Cloudflare D1 without dependency on local machine timezones.
 
 ------------------------------------------------------------------------
 
 ## 18. Transactions
 
 Operations that mutate desired library state and `sync_version` must be
-transactional.
+atomic.
 
-For example:
+In Cloudflare D1 (SQLite), atomicity across multiple statements is
+achieved via `db.batch([stmt1, stmt2, ...])`:
 
 ``` text
-BEGIN
-    update Song
-    increment sync_version
-COMMIT
+db.batch([
+    updateSongStmt,
+    incrementSyncVersionStmt
+])
 ```
 
-If the transaction fails:
+If any statement fails:
 
 ``` text
-ROLLBACK
+The entire batch rolls back automatically.
 ```
 
 The database must not contain a Song mutation without the corresponding

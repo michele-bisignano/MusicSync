@@ -353,19 +353,23 @@ The system should not depend on exact wording.
 
 ### 8.1 Provider stage
 
-Providers may produce candidates and/or canonical metadata.
+The architecture separates search into two distinct provider interfaces:
+1. `MetadataProvider`: Resolves unstructured queries into canonical
+   metadata (Artist, Title, Version).
+2. `SourceProvider`: Resolves canonical metadata or direct links into an
+   audio source URL (e.g. YouTube URL) with stream information.
 
-Possible providers:
+Implementations:
 
 ``` text
-SpotifySearchProvider       optional
-YouTubeSearchProvider       current
-Other provider              future
+SpotifyMetadataProvider         optional, primary for fuzzy metadata resolution
+YouTubeSearchMetadataProvider   fallback when Spotify is unavailable
+YouTubeSourceProvider           current audio source provider
 ```
 
 ### 8.2 Identification stage
 
-A provider may transform an unclear query into:
+A `MetadataProvider` transforms an unclear query into:
 
 ``` text
 artist
@@ -374,7 +378,8 @@ version
 additional metadata
 ```
 
-This information can then improve YouTube search.
+This clean canonical information is then passed to the `SourceProvider`
+(e.g. YouTube) to find the precise audio stream.
 
 ### 8.3 Ranking stage
 
@@ -667,23 +672,22 @@ Conceptually:
 ``` json
 {
   "sync_version": 42,
-  "songs": [
+  "desired_tracks": [
     {
-      "id": 123,
+      "song_id": 123,
       "artist": "Daft Punk",
       "title": "Get Lucky",
       "version_type": "standard",
-      "youtube_url": "https://www.youtube.com/watch?v=..."
+      "youtube_url": "https://www.youtube.com/watch?v=...",
+      "relative_path": "Daft Punk - Get Lucky.mp3"
     }
   ],
-  "tracks": [
-    {
-      "song_id": 123,
-      "relative_path": "Music/Daft Punk - Get Lucky.mp3"
-    }
-  ]
+  "obsolete_tracks": []
 }
 ```
+
+Notice that `relative_path` is strictly relative to the configured
+`MANAGED_FOLDER`, never prefixed with the folder name itself.
 
 The exact JSON schema belongs in `API.md`.
 
@@ -839,6 +843,15 @@ D:\
 
 Only MP3 files are candidates for music synchronization.
 
+`relative_path` is defined strictly relative to `MANAGED_FOLDER`.
+For example, if `MANAGED_FOLDER=Music`, the file:
+`D:\Music\Daft Punk - Get Lucky.mp3`
+has:
+`relative_path = "Daft Punk - Get Lucky.mp3"` (or `"Subfolder/Daft Punk - Get Lucky.mp3"`).
+It must NEVER include the prefix `"Music/"`, ensuring that client
+reconfigurations or multi-platform path roots do not invalidate database
+records.
+
 The scanner produces a physical representation containing information
 such as:
 
@@ -888,6 +901,17 @@ Unknown files are protected.
 
 The planner should be deterministic and highly testable.
 
+### Dry-Run Mode
+
+The CLI supports a `--dry-run` flag. In this mode:
+1. The client fetches desired state from the backend.
+2. The scanner inspects the physical USB.
+3. The planner computes the full `SyncPlan`.
+4. The CLI outputs a detailed preview table of scheduled operations
+   (downloads, deletions, imports, warnings).
+5. The executor is bypassed: no physical files are altered and no report
+   is posted to the backend.
+
 ------------------------------------------------------------------------
 
 ## 24. Importing Existing USB Music
@@ -936,7 +960,8 @@ song_id
 relative_path
 ```
 
-plus timestamps and its own identifier.
+where `relative_path` is strictly relative to `MANAGED_FOLDER`, plus
+timestamps and its own identifier.
 
 It does not store:
 
@@ -1114,8 +1139,8 @@ Interfaces should exist only at meaningful substitution points.
 Examples:
 
 ``` text
-SearchProvider
 MetadataProvider
+SourceProvider
 Downloader
 BackendClient
 FileSystem
@@ -1124,8 +1149,9 @@ FileSystem
 Possible implementations:
 
 ``` text
-YouTubeSearchProvider
-SpotifySearchProvider
+SpotifyMetadataProvider
+YouTubeSearchMetadataProvider
+YouTubeSourceProvider
 YtDlpDownloader
 WindowsFileSystem
 FutureLinuxFileSystem
@@ -1137,21 +1163,22 @@ Not every class needs an interface.
 
 ## 34. Error Codes
 
-Because the first synchronization API has no client secret,
-authentication-specific `401/403` client errors are not required.
+The synchronization API uses HTTP status codes together with structured
+JSON error payloads.
 
 Useful API responses include:
 
 ``` text
 200 OK
 400 Bad Request
+401 Unauthorized (invalid or missing SYNC_TOKEN)
 404 Not Found
-409 Conflict
+409 Conflict (version mismatch)
 500 Internal Server Error
 503 Service Unavailable
 ```
 
-Exact endpoint semantics belong in `API.md`.
+Exact endpoint semantics and JSON error formats belong in `API.md`.
 
 ------------------------------------------------------------------------
 
@@ -1163,26 +1190,27 @@ Backend:
 TELEGRAM_BOT_TOKEN
 AUTHORIZED_TELEGRAM_IDS
 YOUTUBE_API_KEY
+SYNC_TOKEN
+SPOTIFY_CLIENT_ID (optional)
+SPOTIFY_CLIENT_SECRET (optional)
 ```
-
-Optional provider credentials may be added later.
 
 Client:
 
 ``` text
 BACKEND_URL
+SYNC_TOKEN
 USB_PATH
 MANAGED_FOLDER
 ```
 
-There is no:
-
-``` text
-SYNC_CLIENT_SECRET
-SYNC_CLIENT_TOKEN
-```
-
-in the first version.
+Security model:
+The sync API endpoints are protected using a static pre-shared key
+(`SYNC_TOKEN`), transmitted via the standard HTTP header:
+`Authorization: Bearer <SYNC_TOKEN>`.
+This provides robust protection against unauthorized public access on
+Cloudflare Workers without the overhead of user accounts or session
+management.
 
 ------------------------------------------------------------------------
 
@@ -1351,3 +1379,31 @@ packaging
 
 The project should not attempt to implement the entire system in one
 step.
+
+------------------------------------------------------------------------
+
+## 41. Security Architecture & Threat Model
+
+To guarantee the complete safety of the cloud database, the local host machine running downloads, and the destination playback hardware (e.g. car head units), the following mandatory security controls are established:
+
+### 41.1 Database & Cloudflare Worker Security
+- **No Direct Cloud Database Exposure:** Cloudflare D1 has no public IP or direct external database port. Access is mediated exclusively through Worker handlers, and direct administration is restricted to the owner's Cloudflare Dashboard or Wrangler CLI.
+- **Timing-Safe Pre-Shared Key:** All sync endpoints require `Authorization: Bearer <SYNC_TOKEN>`. The Worker compares the provided token with the secret environment variable using constant-time comparison (`crypto.subtle.timingSafeEqual`) to prevent timing attacks.
+- **Parameterized SQL:** All D1 database operations strictly use parameterized queries (`db.prepare(...).bind(...)`). Dynamic string concatenation in SQL statements is prohibited to eliminate SQL injection vectors.
+- **Telegram Webhook Verification:** The Worker strictly validates the `X-Telegram-Bot-Api-Secret-Token` header set on Telegram webhooks and ignores updates from any Telegram user ID not listed in `AUTHORIZED_TELEGRAM_IDS`.
+
+### 41.2 Local Client Execution Security
+- **Strict Command-Line Isolation (No Shell Injection):**
+  When invoking external CLI tools (`yt-dlp`, `FFmpeg`), Python's `subprocess.run` must be called with a strict argument list and **`shell=False`**. `os.system` and `shell=True` are strictly forbidden. Double-dash separators (`--`) must precede untrusted inputs (e.g. `["yt-dlp", "--", validated_url]`) to prevent option injection.
+- **URL Domain Whitelisting:**
+  The client must strictly validate that download URLs belong exclusively to official YouTube domains (`https://www.youtube.com/...`, `https://youtu.be/...`) via regular expressions before invoking any downloader. Non-HTTP protocols (`file://`, `gopher://`, etc.) and internal loopback addresses (`localhost`, `127.0.0.1`, RFC 1918 IPs) are rejected.
+- **Path Traversal Prevention:**
+  Filenames derived from track metadata or backend paths must be sanitized (removing path separators `/`, `\`, and relative navigation tokens `..`). The client must verify that the canonical destination path resides strictly inside `MANAGED_FOLDER` (e.g. using `os.path.commonpath([resolved_dest, managed_folder]) == managed_folder`).
+
+### 41.3 Playback Hardware & Audio File Safety
+- **Car Stereo / Media Player Compatibility:**
+  Embedded players often run minimal or legacy firmware vulnerable to buffer overflows or crashing when parsing malformed audio metadata.
+  - The client writes standard **ID3v2.3** tags (UTF-16/ISO-8859-1 compatible).
+  - Text metadata fields (Artist, Title, Album) are strictly length-capped (maximum 128 characters) and stripped of non-printable control characters.
+  - Corrupt or partially downloaded files are staged in temporary working directories and atomically moved to the destination only after integrity validation.
+

@@ -238,6 +238,11 @@ Telegram itself may still allow the person to open or message the bot;
 MusicSync cannot prevent Telegram from accepting the chat. The
 application should simply ignore unauthorized updates.
 
+However, the application should generate an internal structured log
+warning (e.g. `[WARN] Unauthorized access attempt from Telegram ID: <id>`)
+to aid the administrator in diagnosing misconfigurations without leaking
+any response or information to the unauthorized sender.
+
 This authorization model must remain reusable: another person deploying
 MusicSync configures their own bot token and their own
 `AUTHORIZED_TELEGRAM_IDS`.
@@ -451,13 +456,24 @@ previously known by MusicSync.
 If a previously managed Track disappears from the managed USB folder,
 the client must detect that physical state has changed.
 
-The behavior must be handled by synchronization logic.
+The database represents the desired library, whereas the USB represents
+the current physical state. A manual removal of a physical file from
+the USB does NOT imply the removal of the Song from the database.
 
-The database must not blindly pretend that the physical file still
-exists.
-
-The system must also avoid confusing a manually removed managed file
-with an unknown file.
+The synchronization planner resolves this deterministically:
+1. If the corresponding Song has `status = 'active'` in the database,
+   the file is treated as physically missing.
+2. If the Song has a valid `youtube_url` (`youtube_url != NULL`), the
+   client attempts to restore it by re-downloading the audio file to the
+   managed folder.
+3. If the Song was imported from USB and has no known source
+   (`youtube_url = NULL`), the client cannot restore it. In this case,
+   the client must not crash, must not delete the Song from the database,
+   and must log an explicit warning indicating that the track is
+   physically missing and non-restorable due to a missing source URL.
+4. If the Song has `status = 'removed'` in the database and the file is
+   already absent from the USB, the client simply acknowledges that no
+   further physical deletion is necessary.
 
 ------------------------------------------------------------------------
 
@@ -516,17 +532,19 @@ local ranking
 Top 3 MusicSync candidates
 ```
 
-Spotify may be used as an optional search/metadata provider if its API
-access and terms are suitable for the deployment.
+Spotify is the recommended optional metadata identification provider.
+Using Spotify Web API to resolve colloquial, fuzzy, or imperfect queries
+into canonical metadata (Artist, Title, Version) drastically reduces the
+number of expensive search queries against the YouTube Data API v3 (which
+has strict quota limits). Once canonical metadata is identified, a single
+targeted query to YouTube is used to locate the audio stream URL.
 
-Spotify must not become a mandatory runtime dependency unless that
-decision is explicitly made later.
+Spotify must remain decoupled through a `MetadataProvider` interface:
+if Spotify credentials are not configured or the service is unreachable,
+MusicSync must fall back gracefully to direct YouTube-based search.
 
-Spotify would be used for identification/metadata, not as the audio
-download source.
-
-If Spotify cannot be used, MusicSync must still have a functional search
-path using other providers.
+Spotify is used strictly for metadata resolution and candidate ranking,
+never as an audio download source.
 
 ------------------------------------------------------------------------
 
@@ -710,6 +728,17 @@ Command:
 `/force` exists to allow explicit user intent when normal duplicate
 detection would reject an addition.
 
+Behavior rules:
+1. If the Song does not exist in the library, it is added normally.
+2. If an identical active Song already exists, `/force` explicitly
+   replaces the existing `youtube_url` with the newly provided URL,
+   marks the associated Track as needing re-download, increments
+   `sync_version`, and informs the user that the source URL has been
+   updated.
+3. If the matching Song currently has `status = 'removed'`, `/force`
+   reactivates the record (`status = 'active'`), sets the new
+   `youtube_url`, updates `updated_at`, and increments `sync_version`.
+
 It does not bypass:
 
 -   Telegram authorization;
@@ -766,12 +795,19 @@ Top candidates
  ↓
 User confirms
  ↓
-Duplicate check
+Duplicate check & Logical UPSERT
  ↓
-Create/update Song
+Reactivate existing record or Create new Song
  ↓
 Increment sync_version
 ```
+
+Reactivation rule:
+If the user confirms adding a song that was previously removed
+(`status = 'removed'`), the system must NOT fail due to the UNIQUE
+constraint on normalized metadata. Instead, it performs a logical
+reactivation: sets `status = 'active'`, updates `youtube_url` (if a new
+one is provided), refreshes `updated_at`, and increments `sync_version`.
 
 The USB is not touched.
 

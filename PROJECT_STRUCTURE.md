@@ -155,7 +155,6 @@ Song
 SongIdentity
 Track
 SyncState
-SyncPlan
 ```
 
 Potential supporting domain value objects or enums may be introduced when they provide a clear benefit.
@@ -323,6 +322,18 @@ Application Service
 Domain / Repository
 ```
 
+### Worker Entrypoint & HTTP Routing
+
+```text
+backend/src/index.ts
+```
+
+The Cloudflare Worker entrypoint exports the standard `fetch(request, env, ctx)` handler. It acts as the top-level HTTP router:
+- Routes incoming Telegram webhooks (e.g. `/webhook/telegram`) to `interfaces/telegram/`.
+- Routes REST sync calls (e.g. `/api/v1/sync/*` and `/api/v1/health`) to `interfaces/api/`.
+- Validates the `Authorization: Bearer <SYNC_TOKEN>` header for API routes.
+- Validates the `X-Telegram-Bot-Api-Secret-Token` header for Telegram webhooks.
+
 ### HTTP API
 
 The HTTP layer is responsible for:
@@ -362,19 +373,25 @@ Interfaces should **not** be created for ordinary internal classes merely to sat
 
 # 8. Client Structure
 
-The synchronization client is a separate application.
+The synchronization client is a separate Python application using standard src-layout.
 
-It should be structured around:
+It is structured around:
 
 ```text
 client/
-└── src/
-    ├── domain/
-    ├── application/
-    ├── infrastructure/
-    ├── api/
-    ├── cli/
-    └── config/
+├── pyproject.toml
+├── config.example.toml
+├── src/
+│   └── music_sync/
+│       ├── __init__.py
+│       ├── __main__.py
+│       ├── config.py
+│       ├── domain/
+│       ├── application/
+│       ├── infrastructure/
+│       ├── api/
+│       └── cli/
+└── tests/
 ```
 
 The first implementation targets Windows.
@@ -386,7 +403,7 @@ The architecture must not make Windows-specific behavior part of the synchroniza
 ## 8.1 Client Domain
 
 ```text
-client/src/domain/
+client/src/music_sync/domain/
 ```
 
 Contains concepts needed to reason about physical synchronization.
@@ -407,7 +424,7 @@ The exact ownership of shared concepts between backend and client should be deci
 ## 8.2 Client Application
 
 ```text
-client/src/application/
+client/src/music_sync/application/
 ```
 
 Contains the synchronization workflow.

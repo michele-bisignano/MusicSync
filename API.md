@@ -9,9 +9,10 @@ The API is intentionally small.
 
 The first version does not expose the complete backend or database.
 
-Current synchronization endpoints:
+Current endpoints:
 
 ``` text
+GET  /api/v1/health
 GET  /api/v1/sync/state
 POST /api/v1/sync/report
 ```
@@ -64,26 +65,31 @@ MusicSync checks:
 AUTHORIZED_TELEGRAM_IDS
 ```
 
+Additionally, Cloudflare Worker validates the Telegram Webhook secret
+token header (`X-Telegram-Bot-Api-Secret-Token`).
+
 There is no MusicSync login system.
 
-Unauthorized Telegram users should be ignored without a useful response.
+Unauthorized Telegram users are ignored silently without leaking any
+information.
 
 ### 3.2 Sync Client
 
-The first version has:
+The sync API endpoints are secured using a static pre-shared key
+(`SYNC_TOKEN`).
+
+The client must supply this token on all `/api/v1/*` requests (except
+`/health`) using the standard HTTP header:
 
 ``` text
-no SYNC_CLIENT_SECRET
-no SYNC_CLIENT_TOKEN
+Authorization: Bearer <SYNC_TOKEN>
 ```
 
-The sync client is not a user-facing account.
+If the token is missing or invalid, the backend responds immediately
+with `401 Unauthorized`.
 
-The backend API therefore does not require a client password/secret in
-the first version.
-
-If machine authentication becomes necessary later, it can be added as a
-backward-compatible architectural extension.
+This eliminates public exposure on Cloudflare Workers without requiring
+user accounts, passwords, or session storage.
 
 ------------------------------------------------------------------------
 
@@ -126,7 +132,9 @@ Telegram users.
 
 Returns a complete desired-state snapshot for the sync client.
 
-The response must be sufficient for the client to plan synchronization.
+The response is denormalized at the API boundary specifically to make
+client synchronization planning straightforward and deterministic, while
+the database remains cleanly normalized internally.
 
 The response is associated with a specific:
 
@@ -134,55 +142,54 @@ The response is associated with a specific:
 sync_version
 ```
 
-### 5.2 Conceptual response
+### 5.2 JSON Response Schema
 
 ``` json
 {
   "sync_version": 42,
-  "songs": [
+  "desired_tracks": [
     {
-      "id": 1,
+      "song_id": 1,
       "artist": "Daft Punk",
       "title": "Get Lucky",
       "version_type": "standard",
-      "youtube_url": "https://www.youtube.com/watch?v=..."
-    },
-    {
-      "id": 2,
-      "artist": "Queen",
-      "title": "Don't Stop Me Now",
-      "version_type": "standard",
-      "youtube_url": null
-    }
-  ],
-  "tracks": [
-    {
-      "song_id": 1,
-      "relative_path": "Music/Daft Punk - Get Lucky.mp3"
+      "youtube_url": "https://www.youtube.com/watch?v=...",
+      "relative_path": "Daft Punk - Get Lucky.mp3"
     },
     {
       "song_id": 2,
-      "relative_path": "Music/Queen - Don't Stop Me Now.mp3"
+      "artist": "Queen",
+      "title": "Don't Stop Me Now",
+      "version_type": "standard",
+      "youtube_url": null,
+      "relative_path": "Queen - Don't Stop Me Now.mp3"
+    }
+  ],
+  "obsolete_tracks": [
+    {
+      "song_id": 7,
+      "artist": "The Beatles",
+      "title": "Yesterday",
+      "relative_path": "The Beatles - Yesterday.mp3"
     }
   ]
 }
 ```
 
-This is a conceptual schema. The implementation must define the exact
-JSON contract and field validation.
+Path Rule:
+`relative_path` is always strictly relative to the client's configured
+`MANAGED_FOLDER`. It must never be prefixed with `"Music/"` or any
+folder name.
 
-### 5.3 Removed Songs
+### 5.3 Obsolete and Removed Tracks
 
-The client needs enough information to remove obsolete managed Tracks.
+The `obsolete_tracks` list contains all managed tracks whose corresponding
+Song has `status = 'removed'`.
 
-Therefore the API response should either:
-
--   include removed Songs together with their Track associations; or
--   provide an equivalent explicit representation of removed managed
-    Tracks.
-
-The client must not be forced to infer removals from an incomplete
-response.
+The sync client uses `obsolete_tracks` to locate and safely delete
+managed files from the USB that the user has chosen to remove. This
+removes the need for the client to cross-reference multiple relational
+arrays.
 
 ------------------------------------------------------------------------
 
@@ -251,12 +258,12 @@ Conceptual request:
     {
       "type": "download",
       "song_id": 1,
-      "relative_path": "Music/Daft Punk - Get Lucky.mp3"
+      "relative_path": "Daft Punk - Get Lucky.mp3"
     },
     {
       "type": "delete",
       "song_id": 7,
-      "relative_path": "Music/Old Song.mp3"
+      "relative_path": "Old Song.mp3"
     },
     {
       "type": "import",
@@ -266,15 +273,38 @@ Conceptual request:
         "version_type": "standard",
         "youtube_url": null
       },
-      "relative_path": "Music/Queen - Don't Stop Me Now.mp3"
+      "relative_path": "Queen - Don't Stop Me Now.mp3"
     }
   ]
 }
 ```
 
-The exact schema is finalized during implementation.
+Path Rule:
+`relative_path` across all operations must be strictly relative to the
+client's configured `MANAGED_FOLDER`.
 
-### 8.2 Operation Types
+### 8.2 Response Schema
+
+Upon processing the report, the backend responds with `200 OK` and a
+summary payload containing the new consolidated `sync_version`:
+
+``` json
+{
+  "acknowledged": true,
+  "sync_version": 43,
+  "summary": {
+    "tracks_confirmed": 5,
+    "tracks_removed": 2,
+    "songs_imported": 1
+  }
+}
+```
+
+If the report included new imported tracks, the backend advances
+`sync_version` (e.g. from 42 to 43). The client must store this returned
+version locally as its new aligned state.
+
+### 8.3 Operation Types
 
 The first version supports:
 
@@ -364,9 +394,19 @@ A full distributed job system is not required.
 
 ## 12. API Errors
 
-The first version does not require machine-authentication errors.
+All error responses from the API return a uniform JSON error payload:
 
-Expected responses include:
+``` json
+{
+  "error": {
+    "code": "ERROR_CODE",
+    "message": "Human-readable description of the error",
+    "details": {}
+  }
+}
+```
+
+Expected HTTP status codes and standard codes:
 
 ### `200 OK`
 
@@ -374,36 +414,27 @@ Request completed successfully.
 
 ### `400 Bad Request`
 
-Malformed or invalid request.
+Malformed or invalid request (`INVALID_PAYLOAD`, `MISSING_FIELD`).
 
-Examples:
+### `401 Unauthorized`
 
--   invalid JSON;
--   missing required field;
--   invalid operation type;
--   invalid sync version.
+Missing or invalid `SYNC_TOKEN` in the `Authorization: Bearer <token>` header (`UNAUTHORIZED`).
 
 ### `404 Not Found`
 
-Requested resource or route does not exist.
+Requested resource or route does not exist (`NOT_FOUND`).
 
 ### `409 Conflict`
 
-The requested operation conflicts with current persistent state.
-
-Examples:
-
--   impossible Track association;
--   conflicting identity/path;
--   invalid state transition.
+The requested operation conflicts with current persistent state or version mismatch (`VERSION_CONFLICT`).
 
 ### `500 Internal Server Error`
 
-Unexpected backend failure.
+Unexpected backend failure (`INTERNAL_ERROR`).
 
 ### `503 Service Unavailable`
 
-Backend dependency is temporarily unavailable.
+Backend dependency is temporarily unavailable (`SERVICE_UNAVAILABLE`).
 
 ------------------------------------------------------------------------
 

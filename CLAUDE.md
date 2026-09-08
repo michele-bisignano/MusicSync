@@ -138,12 +138,14 @@ backend/
   tests/
 
 client/
-  music_sync/
-    sync/          # Planner, executor, reporter
-    usb/           # Filesystem scanning, import
-    download/      # yt-dlp/FFmpeg wrapper
-    domain/        # Shared domain types
-    config/
+  pyproject.toml
+  src/
+    music_sync/
+      domain/        # PhysicalTrack, SyncPlan, SyncResult
+      application/   # SyncService, SyncPlanner, SyncExecutor
+      infrastructure/# FileSystem, YtDlpDownloader, BackendClient
+      cli/           # CLI entry points and arguments
+      config.py      # Local settings (USB_PATH, SYNC_TOKEN, etc.)
   tests/
 ```
 
