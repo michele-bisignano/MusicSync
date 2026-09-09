@@ -6,6 +6,7 @@ import {
 } from '../../src/sync/auth.js';
 import worker from '../../src/index.js';
 import { Env } from '../../src/types.js';
+import { createInMemoryD1Database } from '../persistence/d1_test_helper.js';
 
 describe('Auth & Timing-Safe Verification', () => {
   describe('timingSafeEqual', () => {
@@ -120,10 +121,16 @@ describe('Auth & Timing-Safe Verification', () => {
   });
 
   describe('Worker routing & auth integration', () => {
-    const env: Env = {
-      SYNC_TOKEN: 'test_sync_token',
-      TELEGRAM_WEBHOOK_SECRET: 'test_tg_secret',
-    };
+    let env: Env;
+    beforeEach(async () => {
+      const db = await createInMemoryD1Database();
+      env = {
+        SYNC_TOKEN: 'test_sync_token',
+        TELEGRAM_WEBHOOK_SECRET: 'test_tg_secret',
+        DB: db,
+      };
+    });
+    
     const ctx = {} as ExecutionContext;
 
     it('should reject unauthorized /api/v1/sync/state with 401', async () => {

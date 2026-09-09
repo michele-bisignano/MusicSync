@@ -194,7 +194,8 @@ The system is composed of two independent applications:
 
 ---
 
-### Phase 6: Sync API Endpoints (/api/v1/sync/state, /api/v1/sync/report)
+### Phase 6: Sync API Endpoints (/api/v1/sync/state, /api/v1/sync/report) [COMPLETATA]
+- **Stato**: ✅ COMPLETATA
 - **Objective**: Expose the minimal REST API required by the synchronization client, authenticated with `SYNC_TOKEN`.
 - **Components & Actions**:
   - In `backend/src/interfaces/api/`:

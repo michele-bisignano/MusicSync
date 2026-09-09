@@ -7,6 +7,7 @@ import {
 } from './sync/auth.js';
 import { TelegramUpdate } from './telegram/telegram_types.js';
 import { createTelegramBotHandler } from './telegram/telegram_factory.js';
+import { handleSyncState, handleSyncReport } from './sync/sync_handler.js';
 
 export default {
   async fetch(
@@ -75,40 +76,11 @@ export default {
       }
 
       if (path === '/api/v1/sync/state') {
-        if (method !== 'GET') {
-          return errorResponse(
-            'METHOD_NOT_ALLOWED',
-            `Method ${method} not allowed for /api/v1/sync/state`,
-            405
-          );
-        }
-        // Will be connected to persistence in Phase 3/5
-        return jsonResponse(
-          {
-            sync_version: 0,
-            desired_tracks: [],
-            obsolete_tracks: [],
-          },
-          200
-        );
+        return handleSyncState(request, env);
       }
 
       if (path === '/api/v1/sync/report') {
-        if (method !== 'POST') {
-          return errorResponse(
-            'METHOD_NOT_ALLOWED',
-            `Method ${method} not allowed for /api/v1/sync/report`,
-            405
-          );
-        }
-        // Will be connected to persistence in Phase 3/5
-        return jsonResponse(
-          {
-            status: 'accepted',
-            sync_version: 0,
-          },
-          200
-        );
+        return handleSyncReport(request, env);
       }
 
       return errorResponse('NOT_FOUND', `Unknown sync endpoint: ${path}`, 404);
