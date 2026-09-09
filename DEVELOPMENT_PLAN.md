@@ -158,23 +158,39 @@ The system is composed of two independent applications:
 
 ---
 
-### Phase 5: Telegram Bot Interface (Webhook, Authorization, Italian Commands)
+### Phase 5: Telegram Bot Interface (Webhook, Authorization, Italian Commands) [COMPLETATA]
+- **Stato**: ✅ COMPLETATA
 - **Objective**: Implement the Telegram bot interaction layer in Italian, strictly enforcing the user allowlist and delivering an intuitive music search and library management experience.
 - **Components & Actions**:
-  - In `backend/src/interfaces/telegram/`:
-    - Webhook handler verifying `X-Telegram-Bot-Api-Secret-Token`.
-    - Authorization filter: checks `AUTHORIZED_TELEGRAM_IDS`. Unauthorized senders are silently ignored with a structured log warning.
-    - Command handlers:
-      - `/add` / `/aggiungi <query>`: searches providers and renders up to 3 candidates with inline keyboards `[✅ È questa]` and `[❌ No]`.
-      - Direct YouTube links: validates URL, retrieves metadata, and prompts for confirmation.
-      - `/force <youtube-link>`: forces song addition or updates the audio source URL.
-      - `/remove` / `/rimuovi <query>`: searches active songs and requests confirmation before soft-deleting.
-      - `/list` / `/lista`: displays the active desired music library.
-      - `/help` / `/aiuto`: displays concise command instructions in Italian.
+  - [x] Strict authorization filter in `backend/src/telegram/telegram_authorizer.ts`:
+    - [x] Verifies sender ID against comma-separated `AUTHORIZED_TELEGRAM_IDS`.
+    - [x] Unauthorized senders are silently ignored (no responses, zero information leakage) with structured console warning logs.
+  - [x] Telegram API client in `backend/src/telegram/telegram_client.ts`:
+    - [x] Implements `sendMessage`, `editMessageText`, and `answerCallbackQuery` against Telegram Bot API.
+  - [x] Italian UX formatter in `backend/src/telegram/telegram_formatter.ts`:
+    - [x] Markdown formatting for candidates, help guides, remove prompts, and library list with 4000-char message chunking.
+    - [x] Inline keyboards for candidate verification (`[✅ È questa]`, `[❌ No]`), direct link additions, and song removals (`rem:ok:<id>`, `rem:cancel`).
+    - [x] Robust parsing helper `parseCandidateFromMessage`.
+  - [x] Telegram Update Handler in `backend/src/telegram/telegram_handler.ts`:
+    - [x] `/add` / `/aggiungi <query>` or free text: searches providers and displays candidates sequentially with inline buttons.
+    - [x] Direct YouTube links: validates canonical URL, extracts metadata, and presents addition confirmation keyboard.
+    - [x] `/force <youtube-link>`: forces song addition or updates the audio source URL.
+    - [x] `/remove` / `/rimuovi <query>`: token-overlap search among active songs and requests confirmation before soft-deleting.
+    - [x] `/list` / `/lista`: displays the active desired music library with clean track count.
+    - [x] `/help` / `/aiuto` / `/start`: displays concise command instructions in Italian.
+    - [x] Callback queries: handles `add:ok`, `add:cancel`, `next:<vid>`, `rem:ok:<id>`, `rem:cancel`.
+  - [x] Dependency injection and routing integration:
+    - [x] `createTelegramBotHandler(env)` factory in `backend/src/telegram/telegram_factory.ts`.
+    - [x] Webhook route dispatch in `backend/src/index.ts` behind `X-Telegram-Bot-Api-Secret-Token` check.
 - **Verification Criteria**:
-  - Automated tests with simulated Telegram webhook payloads for all commands and callback queries.
-  - Unauthorized Telegram IDs receive zero responses and leak no information.
-  - Successful candidate confirmations properly advance `sync_version` in the database.
+  - [x] Automated Vitest unit and integration test suite in `backend/tests/telegram/`:
+    - [x] `telegram_authorizer.test.ts`: allows authorized users, silently rejects unauthorized users with log, handles edge cases.
+    - [x] `telegram_formatter.test.ts`: Italian commands, candidate formatting, chunked lists, candidate parsing.
+    - [x] `telegram_handler.test.ts`: simulates webhook updates for all commands, candidate acceptance/rejection flows, `/force`, and removal flows.
+  - [x] Unauthorized Telegram IDs receive zero responses and leak no information.
+  - [x] Successful candidate confirmations properly advance `sync_version` in the database.
+  - [x] All 95 tests passing cleanly (`95 passed (95)`).
+  - [x] `npx tsc --noEmit` compiles without errors.
 
 ---
 

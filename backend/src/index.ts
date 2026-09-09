@@ -5,6 +5,8 @@ import {
   validateSyncAuth,
   validateTelegramWebhook,
 } from './sync/auth.js';
+import { TelegramUpdate } from './telegram/telegram_types.js';
+import { createTelegramBotHandler } from './telegram/telegram_factory.js';
 
 export default {
   async fetch(
@@ -50,7 +52,18 @@ export default {
         return authCheck.errorResponse!;
       }
 
-      // Handler will be fully implemented in Phase 7 (Telegram Bot)
+      // Dispatch to Telegram Bot Handler
+      try {
+        const rawBody = await request.text();
+        if (rawBody && rawBody.trim()) {
+          const update = JSON.parse(rawBody) as TelegramUpdate;
+          const botHandler = createTelegramBotHandler(env);
+          await botHandler.handleUpdate(update);
+        }
+      } catch (err) {
+        console.error('Failed to process Telegram update:', err);
+      }
+
       return jsonResponse({ ok: true }, 200);
     }
 

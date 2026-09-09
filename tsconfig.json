@@ -12,5 +12,9 @@
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["worker-configuration.d.ts", "src/**/*", "tests/**/*"]
+  "include": [
+    "backend/worker-configuration.d.ts",
+    "backend/src/**/*",
+    "backend/tests/**/*"
+  ]
 }

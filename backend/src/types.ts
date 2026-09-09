@@ -1,3 +1,7 @@
+/// <reference types="@cloudflare/workers-types" />
+
+export type AppD1Database = D1Database;
+
 export interface Env {
   DB?: D1Database;
   TELEGRAM_BOT_TOKEN?: string;
@@ -5,6 +9,8 @@ export interface Env {
   AUTHORIZED_TELEGRAM_IDS?: string;
   SYNC_TOKEN?: string;
   YOUTUBE_API_KEY?: string;
+  SPOTIFY_CLIENT_ID?: string;
+  SPOTIFY_CLIENT_SECRET?: string;
   ENVIRONMENT?: string;
 }
 
