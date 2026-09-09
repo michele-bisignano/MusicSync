@@ -1,30 +1,50 @@
-# Environment / secrets
+# Environment / Secrets
 .env
-.env.local
+.env.*
+!.env.example
 *.local
 secrets.json
 secrets.*
+config.local.toml
+config.local.json
 config.py
 config.json
-config.local.json
 
-# Local D1 databases (backend)
+# Backend (Cloudflare Worker / Node)
+node_modules/
+.wrangler/
+dist/
+.dev.vars
 d1.json
 data/
 .migrations/
+*.db
+*.sqlite
 
-# Local node
-node_modules/
-
-# Python (Windows client)
+# Client (Python)
 __pycache__/
 *.pyc
 .venv/
 venv/
+.pytest_cache/
+*.egg-info/
+.coverage
+
+# Logs & Caches
+*.log
+npm-debug.log*
+yarn-debug.log*
+.cache/
 
 # Editors / OS
 .DS_Store
 Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
 
-# Google AI Studio
+# Google AI Studio container
 metadata.json
+package.json
+server.js

@@ -1,7 +1,5 @@
 ```text
-MusicSync/
-├── .claude/
-│   └── settings.local.json
+applet/
 ├── .gitignore
 ├── API.md
 ├── ARCHITECTURE.md
@@ -9,8 +7,9 @@ MusicSync/
 ├── DATABASE.md
 ├── DEVELOPMENT_PLAN.md
 ├── docs/
+│   └── project_structure/
+│       └── repository_tree.md
 ├── LICENSE
-├── metadata.json
 ├── PROJECT_STRUCTURE.md
 ├── REQUIREMENTS.md
 └── tools/

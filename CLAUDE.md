@@ -93,6 +93,7 @@ Only two endpoints for Windows client:
 5. **Sync safety** — if backend/USB unavailable, leave data untouched and report failure
 6. **No AI runtime** — deterministic search ranking, normalization, duplicate detection
 7. **Italian UI** — all bot messages in Italian
+8. **Auto-generated repository tree** — `docs/project_structure/repository_tree.md` is automatically regenerated on every commit via git pre-commit hook (`tools/project_tree/generate_tree.py`). NEVER modify it manually.
 
 ---
 
@@ -154,3 +155,7 @@ client/
 ## Non-Goals (First Version)
 
 No GUI, web UI, mobile app, streaming, multiple USBs, playlists, AI, continuous polling, Windows service, background daemon, complex auth, microservices, Redis, WebSockets, event sourcing, CQRS.
+
+---
+
+*(Note: Temporary `.gitkeep` files are placed in empty directory skeletons. They must be removed as each folder gets populated with actual source files. Once all `.gitkeep` files are removed, this note must also be deleted from `CLAUDE.md`)*

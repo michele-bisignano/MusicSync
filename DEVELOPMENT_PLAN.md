@@ -40,7 +40,7 @@ The system is composed of two independent applications:
 ## 3. Phased Implementation Roadmap
 
 ```
-[Phase 1] Repository Structure, Document Reorganization & .gitignore
+[Phase 1] Repository Structure, Document Reorganization & .gitignore [COMPLETATA]
     │
 [Phase 2] Backend Core & Tooling (TypeScript, Wrangler, Vitest)
     │
@@ -63,17 +63,18 @@ The system is composed of two independent applications:
 
 ---
 
-### Phase 1: Repository Structure, Document Reorganization & Tooling Setup
+### Phase 1: Repository Structure, Document Reorganization & Tooling Setup [COMPLETATA]
+- **Stato**: ✅ COMPLETATA
 - **Objective**: Align the repository with `PROJECT_STRUCTURE.md`, organize design documentation, configure `.gitignore`, and ensure Google AI Studio can run tests cleanly without committing preview artifacts.
 - **Components & Actions**:
-  - Move design documents (`REQUIREMENTS.md`, `ARCHITECTURE.md`, `DATABASE.md`, `API.md`) into `docs/design/`.
-  - Move `PROJECT_STRUCTURE.md` into `docs/`.
-  - Update `.gitignore` to ignore:
+  - [x] Move design documents (`REQUIREMENTS.md`, `ARCHITECTURE.md`, `DATABASE.md`, `API.md`) into `docs/design/`.
+  - [x] Move `PROJECT_STRUCTURE.md` into `docs/`.
+  - [x] Update `.gitignore` to ignore:
     - Node & Python build artifacts: `node_modules/`, `.venv/`, `__pycache__/`, `*.pyc`.
     - Local Cloudflare D1 data: `.wrangler/`, `d1.json`, `data/`, `.migrations/`.
     - Environment secrets: `.env`, `.env.local`, `secrets.json`, `config.local.toml`.
     - Google AI Studio preview dummy files or dev-server files.
-  - Create directory skeletons for `backend/` and `client/`.
+  - [x] Create directory skeletons for `backend/` and `client/`.
 - **Verification Criteria**:
   - `git status` reflects clean layout with ignored artifacts.
   - AI Studio preview container operates without workspace errors.
