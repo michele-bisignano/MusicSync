@@ -9,5 +9,5 @@ ENVIRONMENT = "production"
 [[d1_databases]]
 binding = "DB"
 database_name = "musicsync-db"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "594657fc-6808-4340-a2c3-e4436ad232e2"
 migrations_dir = "migrations"

@@ -10,7 +10,8 @@
     "isolatedModules": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "lib": ["ES2022", "WebWorker"]
   },
-  "include": ["worker-configuration.d.ts", "src/**/*", "tests/**/*"]
+  "include": ["worker-configuration.d.ts", "src/**/*", "tests/**/*", "src/global.d.ts"]
 }
