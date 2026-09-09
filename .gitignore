@@ -9,6 +9,7 @@ config.local.toml
 config.local.json
 config.py
 config.json
+dev.vars
 
 # Backend (Cloudflare Worker / Node)
 node_modules/
