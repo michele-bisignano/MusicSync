@@ -25,3 +25,6 @@ venv/
 # Editors / OS
 .DS_Store
 Thumbs.db
+
+# Google AI Studio
+metadata.json
