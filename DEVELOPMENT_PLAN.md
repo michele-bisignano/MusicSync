@@ -42,11 +42,11 @@ The system is composed of two independent applications:
 ```
 [Phase 1] Repository Structure, Document Reorganization & .gitignore [COMPLETATA]
     │
-[Phase 2] Backend Core & Tooling (TypeScript, Wrangler, Vitest)
+[Phase 2] Backend Core & Tooling (TypeScript, Wrangler, Vitest) [COMPLETATA]
     │
-[Phase 3] Database D1 (Schema, Migrations, Repositories, Batch Transactions)
+[Phase 3] Database D1 (Schema, Migrations, Repositories, Batch Transactions) [COMPLETATA]
     │
-[Phase 4] Domain Logic & Search Architecture (Spotify Primary, YouTube Source)
+[Phase 4] Domain Logic & Search Architecture (Spotify Primary, YouTube Source) [COMPLETATA]
     │
 [Phase 5] Telegram Bot Interface (Webhook, Authorization, Italian Commands)
     │
@@ -81,59 +81,80 @@ The system is composed of two independent applications:
 
 ---
 
-### Phase 2: Backend Core & Tooling (Cloudflare Worker + TypeScript)
+### Phase 2: Backend Core & Tooling (Cloudflare Worker + TypeScript) [COMPLETATA]
+- **Stato**: ✅ COMPLETATA
 - **Objective**: Establish the Cloudflare Worker application skeleton with strict TypeScript configuration, automated testing via Vitest, and an HTTP router.
 - **Components & Actions**:
-  - Create `backend/package.json`, `backend/tsconfig.json`, `backend/wrangler.toml`.
-  - Create `backend/src/index.ts` with standard `fetch(request, env, ctx)` handler:
-    - Route `/api/v1/health` for diagnostics.
-    - Router dispatching `/telegram/webhook` and `/api/v1/sync/*`.
-    - Constant-time `Authorization: Bearer <SYNC_TOKEN>` verification middleware.
-    - Telegram webhook secret token validation.
-  - Configure Vitest for fast, offline unit testing.
+  - [x] Create `backend/package.json`, `backend/tsconfig.json`, `backend/wrangler.toml`.
+  - [x] Create `backend/src/index.ts` with standard `fetch(request, env, ctx)` handler:
+    - [x] Route `/api/v1/health` for diagnostics.
+    - [x] Router dispatching `/telegram/webhook` and `/api/v1/sync/*`.
+    - [x] Constant-time `Authorization: Bearer <SYNC_TOKEN>` verification middleware.
+    - [x] Telegram webhook secret token validation.
+  - [x] Configure Vitest for fast, offline unit testing.
 - **Verification Criteria**:
-  - `npx tsc --noEmit` compiles without errors.
-  - `npm test` runs Vitest and passes all basic routing and security header tests.
+  - [x] `npx tsc --noEmit` compiles without errors.
+  - [x] `npm test` runs Vitest and passes all basic routing and security header tests (20/20 tests passed).
 
 ---
 
-### Phase 3: Database D1 (Schema, Migrations, Repositories & Atomicity)
+### Phase 3: Database D1 (Schema, Migrations, Repositories & Atomicity) [COMPLETATA]
+- **Stato**: ✅ COMPLETATA
 - **Objective**: Define the SQLite-compatible D1 schema according to `DATABASE.md` and implement repository abstractions to isolate persistence from application logic.
 - **Components & Actions**:
-  - Create `backend/migrations/0001_initial.sql`:
-    - `songs` table with unique constraint on `(normalized_artist, normalized_title, version_type)` and partial unique index on non-null `youtube_url`.
-    - `tracks` table with foreign key to `songs(id)` and unique constraint on `relative_path` and `song_id`.
-    - `sync_state` singleton table (`id = 1`, `sync_version >= 0`).
-  - Implement repositories in `backend/src/infrastructure/database/`:
-    - `D1SongRepository`: find, insert, logical UPSERT (reactivation of removed songs), update.
-    - `D1TrackRepository`: track creation, association, obsolete track deletion.
-    - `D1SyncStateRepository`: get version, atomic increment via `db.batch()`.
-  - Ensure all database queries use strictly parameterized statements (`db.prepare(...).bind(...)`).
+  - [x] Create `backend/migrations/0001_initial.sql`:
+    - [x] `songs` table with unique constraint on `(normalized_artist, normalized_title, version_type)` and partial unique index on non-null `youtube_url`.
+    - [x] `tracks` table with foreign key to `songs(id)` (ON DELETE RESTRICT) and unique constraint on `relative_path` and `song_id`.
+    - [x] `sync_state` singleton table (`id = 1`, `sync_version >= 0`).
+  - [x] Implement domain models in `backend/src/domain/`:
+    - [x] `version_type.ts`: `VersionType` enum and validation.
+    - [x] `song.ts`: `Song` entity, `SongStatus`, `SongIdentity`.
+    - [x] `track.ts`: `Track` entity.
+    - [x] `sync_state.ts`: `SyncState` entity.
+  - [x] Implement repositories in `backend/src/persistence/`:
+    - [x] `D1SongRepository`: findById, findByIdentity, findByYouTubeUrl, listActive, listAll, insert, logical UPSERT / reactivation, softDelete, prepared statements.
+    - [x] `D1TrackRepository`: track creation, association lookup, deletion by id / songId / relativePath.
+    - [x] `D1SyncStateRepository`: singleton fetch, atomic increment, sync completion metadata.
+  - [x] Ensure all database queries use strictly parameterized statements (`db.prepare(...).bind(...)`).
 - **Verification Criteria**:
-  - Migration applies cleanly to local D1 instance (`wrangler d1 migrations apply`).
-  - Vitest integration tests verify unique constraints, version monotonicity, and reactivation of soft-deleted songs.
+  - [x] Migration applies cleanly to local D1 instance (`wrangler d1 migrations apply DB --local`).
+  - [x] Vitest integration tests verify unique constraints, version monotonicity, atomicity rollback with `db.batch()`, and reactivation of soft-deleted songs (40/40 tests passed).
+  - [x] `npx tsc --noEmit` compiles without errors.
 
 ---
 
-### Phase 4: Domain Logic & Search Architecture (Spotify Primary, YouTube Source)
+### Phase 4: Domain Logic & Search Architecture (Spotify Primary, YouTube Source) [COMPLETATA]
+- **Stato**: ✅ COMPLETATA
 - **Objective**: Implement the domain rules, normalization, YouTube URL validation, and a decoupled search engine featuring Spotify for canonical metadata and YouTube for audio source resolution.
 - **Components & Actions**:
-  - Domain models in `backend/src/domain/`:
-    - `Song`, `Track`, `SyncState`.
-    - `Normalizer`: lowercase conversion, accent stripping, punctuation normalization, removal of video clutter (`Official Video`, `Lyrics`), and version detection (`standard`, `cover`, `remix`, `acoustic`, `live`).
-    - `YouTubeValidator`: strict regex verification of genuine YouTube hostnames (`youtube.com`, `youtu.be`), rejecting lookalike domains.
-  - Provider interfaces in `backend/src/interfaces/providers/`:
-    - `MetadataProvider` interface: resolves raw queries into canonical `{ artist, title, version_type }`.
-    - `SpotifyMetadataProvider`: primary metadata provider using Spotify Web API.
-    - `YouTubeSearchMetadataProvider`: fallback metadata provider when Spotify credentials are absent.
-    - `SourceProvider` interface: finds the best matching YouTube URL.
-    - `YouTubeSourceProvider`: queries YouTube Data API v3 for stream links.
-  - Application services in `backend/src/application/`:
-    - `SearchService`: coordinates metadata resolution, queries source provider, and computes deterministic ranking (token overlap, version matching, penalizing live versions for standard searches).
-    - `LibraryService`: manages additions, soft-deletions, duplicate checks, and `/force` override handling.
+  - [x] Domain normalization in `backend/src/domain/normalization.ts`:
+    - [x] `normalizeString`: lowercase conversion, accent stripping (NFD), punctuation normalization, whitespace collapsing.
+    - [x] `stripVideoClutter`: removal of video tags (`Official Video`, `Lyrics`, `Visualizer`, etc.).
+    - [x] `detectVersionType`: version detection (`standard`, `cover`, `remix`, `acoustic`, `live`).
+    - [x] `parseArtistAndTitle`: hyphen/dash extraction of artist and title.
+    - [x] `calculateTokenOverlap`: Jaccard token overlap for search ranking.
+  - [x] Strict YouTube URL validation in `backend/src/validation/youtube_url.ts`:
+    - [x] Strict hostname verification (`youtube.com`, `www.youtube.com`, `m.youtube.com`, `music.youtube.com`, `youtu.be`).
+    - [x] Strict rejection of lookalike domain attacks (`evil.example/youtube.com`, `youtube.com.evil.example`).
+    - [x] Rejection of non-HTTP protocols and embedded credentials.
+    - [x] Canonicalization to standard 11-char video ID format (`https://www.youtube.com/watch?v=...`).
+  - [x] Provider interfaces in `backend/src/search/`:
+    - [x] `MetadataProvider` interface (`metadata_provider.ts`).
+    - [x] `SpotifyMetadataProvider`: primary metadata provider using Spotify Web API (`spotify_provider.ts`).
+    - [x] `YouTubeSearchMetadataProvider`: fallback metadata provider (`youtube_search_provider.ts`).
+    - [x] `SourceProvider` interface (`source_provider.ts`).
+    - [x] `YouTubeSourceProvider`: audio source provider with offline fallback (`youtube_source_provider.ts`).
+    - [x] `CandidateRanker`: deterministic scoring based on exact match, token overlap, and unrequested live version penalty (`candidate_ranker.ts`).
+    - [x] `SearchService`: coordination of metadata and source providers, direct YouTube URL handling (`search_service.ts`).
+  - [x] Application library service in `backend/src/library/`:
+    - [x] `DuplicateChecker`: duplicate detection by identity and YouTube URL (`duplicate_checker.ts`).
+    - [x] `LibraryService`: addition, logical reactivation / UPSERT, `/force` addition, soft removal, atomic `db.batch()` with `sync_version` increment (`library_service.ts`).
 - **Verification Criteria**:
-  - Vitest unit tests covering normalization edge cases, lookalike URL rejection, and duplicate detection.
-  - Test suites using mock providers to verify ranking accuracy and graceful fallback to YouTube if Spotify is unconfigured.
+  - [x] Vitest unit tests covering normalization edge cases, lookalike URL rejection, and duplicate detection.
+  - [x] Test suites using mock providers verifying ranking accuracy and graceful fallback to YouTube if Spotify is unconfigured.
+  - [x] Integration tests for LibraryService verifying atomic version monotonicity and reactivation.
+  - [x] All 74 tests passing cleanly (`74 passed (74)`).
+  - [x] `npx tsc --noEmit` compiles without errors.
 
 ---
 
