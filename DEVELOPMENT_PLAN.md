@@ -48,15 +48,15 @@ The system is composed of two independent applications:
     │
 [Phase 4] Domain Logic & Search Architecture (Spotify Primary, YouTube Source) [COMPLETATA]
     │
-[Phase 5] Telegram Bot Interface (Webhook, Authorization, Italian Commands)
+[Phase 5] Telegram Bot Interface (Webhook, Authorization, Italian Commands) [COMPLETATA]
     │
-[Phase 6] Sync API Endpoints (/api/v1/sync/state, /api/v1/sync/report)
+[Phase 6] Sync API Endpoints (/api/v1/sync/state, /api/v1/sync/report) [COMPLETATA]
     │
-[User Checkpoint] External Credentials Setup (Telegram, Cloudflare, Spotify, YouTube)
+[User Checkpoint] External Credentials Setup (Telegram, Cloudflare, Spotify, YouTube) [COMPLETATA]
     │
-[Phase 7] Cloudflare Deployment & Live Telegram Music Collection
+[Phase 7] Cloudflare Deployment & Live Telegram Music Collection [COMPLETATA]
     │
-[Phase 8] Python Client — USB Scanner & Existing Library Cataloging (--import-usb)
+[Phase 8] Python Client — USB Scanner & Existing Library Cataloging (--import-usb) [COMPLETATA]
     │
 [Phase 9] Python Client — Full Sync Planner & Executor (yt-dlp, FFmpeg, ID3v2.3)
 ```
