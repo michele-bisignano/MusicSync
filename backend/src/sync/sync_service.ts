@@ -285,6 +285,7 @@ export class SyncService {
     let shouldAdvanceVersion = false;
     const now = getCurrentIsoTimestamp();
     const batchStatements: D1PreparedStatement[] = [];
+    const seenIdentitiesInBatch = new Set<string>();
 
     for (const op of report.operations) {
       if (op.type === 'download') {
@@ -335,6 +336,12 @@ export class SyncService {
         const normalizedTitle = normalizeString(stripVideoClutter(title));
         const relativePath = op.relative_path.trim();
         const youtubeUrl = op.song.youtube_url?.trim() || null;
+
+        const identityKey = `${normalizedArtist}:::${normalizedTitle}:::${versionType}`;
+        if (seenIdentitiesInBatch.has(identityKey)) {
+          continue;
+        }
+        seenIdentitiesInBatch.add(identityKey);
 
         const existingSong = await this.songRepo.findByIdentity(
           normalizedArtist,

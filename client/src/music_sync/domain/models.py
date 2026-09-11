@@ -111,3 +111,71 @@ class ImportOperation:
             "song": self.song.to_dict(),
             "relative_path": self.relative_path,
         }
+
+
+class PlanAction(str, Enum):
+    KEEP = "keep"
+    DOWNLOAD = "download"
+    DELETE = "delete"
+    IMPORT = "import"
+    WARN_MISSING_SOURCE = "warn_missing_source"
+
+
+@dataclass
+class SyncPlanItem:
+    action: PlanAction
+    relative_path: str
+    artist: str
+    title: str
+    version_type: VersionType = VersionType.STANDARD
+    youtube_url: Optional[str] = None
+    song_id: Optional[int] = None
+    reason: str = ""
+
+
+@dataclass
+class SyncPlan:
+    sync_version: int
+    items: list[SyncPlanItem] = field(default_factory=list)
+
+    @property
+    def to_keep(self) -> list[SyncPlanItem]:
+        return [item for item in self.items if item.action == PlanAction.KEEP]
+
+    @property
+    def to_download(self) -> list[SyncPlanItem]:
+        return [item for item in self.items if item.action == PlanAction.DOWNLOAD]
+
+    @property
+    def to_delete(self) -> list[SyncPlanItem]:
+        return [item for item in self.items if item.action == PlanAction.DELETE]
+
+    @property
+    def to_import(self) -> list[SyncPlanItem]:
+        return [item for item in self.items if item.action == PlanAction.IMPORT]
+
+    @property
+    def warnings(self) -> list[SyncPlanItem]:
+        return [item for item in self.items if item.action == PlanAction.WARN_MISSING_SOURCE]
+
+    @property
+    def is_empty(self) -> bool:
+        """Returns True if there are no actionable operations (downloads, deletes, imports)."""
+        return (
+            len(self.to_download) == 0
+            and len(self.to_delete) == 0
+            and len(self.to_import) == 0
+        )
+
+
+@dataclass
+class SyncExecutionResult:
+    sync_version: int
+    downloaded_count: int = 0
+    deleted_count: int = 0
+    imported_count: int = 0
+    failed_downloads: list[tuple[SyncPlanItem, str]] = field(default_factory=list)
+    failed_deletions: list[tuple[SyncPlanItem, str]] = field(default_factory=list)
+    failed_imports: list[tuple[SyncPlanItem, str]] = field(default_factory=list)
+    acknowledged_version: Optional[int] = None
+    status: str = "success"

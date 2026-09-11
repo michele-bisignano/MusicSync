@@ -144,3 +144,45 @@ class FileSystem:
         # Sort deterministically by relative path
         tracks.sort(key=lambda t: t.relative_path.lower())
         return tracks
+
+    def file_exists(self, relative_path: str) -> bool:
+        """Checks if a file exists safely inside MANAGED_FOLDER."""
+        try:
+            target = self.resolve_safe_path(relative_path)
+            return target.is_file()
+        except (PathTraversalSecurityError, OSError):
+            return False
+
+    def delete_file(self, relative_path: str) -> bool:
+        """
+        Safely deletes a file inside MANAGED_FOLDER.
+        Returns True if the file existed and was deleted, False if it was already absent.
+        """
+        target = self.resolve_safe_path(relative_path)
+        if not target.exists():
+            return False
+        try:
+            target.unlink()
+            return True
+        except OSError as e:
+            raise FileSystemError(f"Failed to delete file '{target}': {e}") from e
+
+    def cleanup_part_files(self) -> int:
+        """
+        Removes all leftover temporary download files (.part, .tmp, .ytdl) in MANAGED_FOLDER.
+        Returns the number of removed files.
+        """
+        if not self.is_managed_folder_available():
+            return 0
+        removed_count = 0
+        try:
+            for temp_file in self.managed_root.rglob("*"):
+                if temp_file.is_file() and temp_file.name.lower().endswith((".part", ".tmp", ".ytdl")):
+                    try:
+                        temp_file.unlink()
+                        removed_count += 1
+                    except OSError:
+                        pass
+        except OSError as e:
+            raise FileSystemError(f"Error cleaning temporary files in '{self.managed_root}': {e}") from e
+        return removed_count

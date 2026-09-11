@@ -1,7 +1,5 @@
 ```text
-MusicSync/
-├── .claude/
-│   └── settings.local.json
+applet/
 ├── .gitignore
 ├── backend/
 │   ├── .dev.vars.example

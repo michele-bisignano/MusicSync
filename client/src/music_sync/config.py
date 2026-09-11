@@ -34,9 +34,10 @@ class ConfigurationError(Exception):
 
 
 def _find_default_config_file() -> Optional[Path]:
-    """Looks for config.local.toml or config.toml in current and parent directories."""
+    """Looks for config.local.toml or config.toml in current, executable, and parent directories."""
     search_dirs = [
         Path.cwd(),
+        Path(sys.executable).parent,
         Path.cwd() / "client",
         Path(__file__).resolve().parent.parent.parent,
     ]

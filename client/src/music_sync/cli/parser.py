@@ -13,9 +13,11 @@ def create_cli_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python -m music_sync --import-usb --dry-run
-  python -m music_sync --import-usb --usb-path D:\\
-  python -m music_sync --import-usb --config config.toml
+  python -m music_sync                          # Run full synchronization
+  python -m music_sync --dry-run                # Preview synchronization plan without altering files
+  python -m music_sync --import-usb             # Scan and catalog pre-existing USB files to database
+  python -m music_sync --import-usb --dry-run   # Preview pre-existing USB files to be cataloged
+  python -m music_sync --usb-path D:\\           # Specify USB drive path
         """,
     )
 

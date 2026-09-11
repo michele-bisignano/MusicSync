@@ -29,9 +29,14 @@ def test_format_table():
     assert "Song - Artist.mp3" in table
 
 
-def test_run_cli_no_args():
-    exit_code = run_cli([])
-    assert exit_code == 0
+def test_run_cli_help(capsys):
+    with pytest.raises(SystemExit) as excinfo:
+        run_cli(["--help"])
+    assert excinfo.value.code == 0
+    captured = capsys.readouterr()
+    assert "MusicSync" in captured.out
+    assert "--import-usb" in captured.out
+    assert "--dry-run" in captured.out
 
 
 def test_run_cli_import_dry_run(tmp_path: Path, capsys):
@@ -40,12 +45,15 @@ def test_run_cli_import_dry_run(tmp_path: Path, capsys):
     music_dir.mkdir(parents=True)
     (music_dir / "Queen - Bohemian Rhapsody.mp3").write_bytes(b"dummy")
 
-    exit_code = run_cli([
-        "--import-usb",
-        "--dry-run",
-        "--usb-path",
-        str(usb_dir),
-    ])
+    with patch("music_sync.config._find_default_config_file", return_value=None):
+        exit_code = run_cli([
+            "--import-usb",
+            "--dry-run",
+            "--usb-path",
+            str(usb_dir),
+            "--managed-folder",
+            "Music",
+        ])
 
     assert exit_code == 0
     captured = capsys.readouterr()

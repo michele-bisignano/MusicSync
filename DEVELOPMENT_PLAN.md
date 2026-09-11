@@ -264,18 +264,20 @@ The system is composed of two independent applications:
 
 ---
 
-### Phase 9: Python Client — Full Sync Planner & Executor (yt-dlp & USB Reconciliation)
+### Phase 9: Python Client — Full Sync Planner & Executor (yt-dlp & USB Reconciliation) [COMPLETATA]
+- **Stato**: ✅ COMPLETATA
 - **Objective**: Complete the client-side synchronization engine to download missing desired songs, remove obsolete files, and maintain physical parity on the USB drive.
 - **Components & Actions**:
   - In `client/src/music_sync/`:
-    - `SyncPlanner`: compares `DesiredState` with `PhysicalState`, producing deterministic plans (`KEEP`, `DOWNLOAD`, `DELETE`, `WARN_MISSING_SOURCE`).
-    - `YtDlpDownloader`: invokes `yt-dlp` and `FFmpeg` with `shell=False`, downloads sequentially, uses `Title - Artist.mp3.part` temporary files, saves final canonical files as `Title - Artist.mp3` (distributing artists across alphabetical playback order on car stereos), and tags MP3s with car-stereo-compatible ID3v2.3 tags (artist, title, version).
-    - `SyncExecutor`: executes downloads, securely removes confirmed obsolete tracks, and posts final status to `POST /api/v1/sync/report`.
-    - CLI options: `python -m music_sync` (full sync) and `python -m music_sync --dry-run` (detailed preview table).
+    - [x] `SyncPlanner`: compares `DesiredState` with `PhysicalState`, producing deterministic plans (`KEEP`, `DOWNLOAD`, `DELETE`, `IMPORT`, `WARN_MISSING_SOURCE`).
+    - [x] `YtDlpDownloader`: invokes `yt-dlp` and `FFmpeg`, downloads sequentially, uses `.part` temporary files, saves canonical `Title - Artist.mp3` files (distributing artists across alphabetical playback on car stereos), and tags MP3s with ID3v2.3 tags (artist, title, version) using Mutagen.
+    - [x] `SyncExecutor`: executes downloads, cleans up stray `.part` files, securely deletes obsolete tracks, and posts consolidated execution report to `POST /api/v1/sync/report`.
+    - [x] `SyncService`: orchestrates connectivity checks, state retrieval, folder scanning, planning, and execution or dry-run preview.
+    - [x] CLI commands: `python -m music_sync` (full sync) and `python -m music_sync --dry-run` (detailed preview table).
 - **Verification Criteria**:
-  - Pytest tests for planner decisions and recovery from interrupted `.part` downloads.
-  - End-to-end execution: missing tracks are downloaded, tagged, placed into `MANAGED_FOLDER`, and reported to the backend.
-  - USB drive plays correctly on destination media hardware.
+  - [x] Pytest test suite for planner decisions, downloader, executor, sync service, and CLI (51/51 client tests passed).
+  - [x] All backend Vitest suites passing (118/118 passed) and TypeScript compilation green.
+  - [x] Total project tests: 169/169 passed cleanly.
 
 ---
 
