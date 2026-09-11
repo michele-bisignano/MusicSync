@@ -109,6 +109,8 @@ MusicSync/
 │   └── PROJECT_STRUCTURE.md
 ├── LICENSE
 ├── package-lock.json
+├── public/
+│   └── MusicSync_icon.png
 ├── tools/
 │   └── project_tree/
 │       ├── generate_tree.py
