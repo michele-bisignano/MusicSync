@@ -4,6 +4,7 @@ MusicSync/
 │   └── settings.local.json
 ├── .gitignore
 ├── backend/
+│   ├── .dev.vars.example
 │   ├── deploy_setup.sh
 │   ├── migrations/
 │   │   └── 0001_initial.sql
