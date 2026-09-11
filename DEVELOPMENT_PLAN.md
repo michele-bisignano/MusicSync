@@ -199,14 +199,16 @@ The system is composed of two independent applications:
 - **Objective**: Expose the minimal REST API required by the synchronization client, authenticated with `SYNC_TOKEN`.
 - **Components & Actions**:
   - In `backend/src/interfaces/api/`:
-    - `GET /api/v1/sync/state`: returns consistent snapshot with `sync_version`, `desired_tracks` (with relative paths to `MANAGED_FOLDER`), and `obsolete_tracks`.
-    - `POST /api/v1/sync/report`: accepts client execution report (`download`, `delete`, `import`).
-    - Transactional handling of `import` operations: creates song records (`youtube_url = NULL`) and associated tracks, advancing `sync_version`.
-    - Safe deletion of obsolete `tracks` records after client confirmation, leaving `songs` soft-deleted.
-    - Uniform JSON error payloads with standard HTTP codes (200, 400, 401, 409).
+    - [x] `GET /api/v1/sync/state`: returns consistent snapshot with `sync_version`, `desired_tracks` (with canonical `Title - Artist.mp3` relative paths to `MANAGED_FOLDER`), and `obsolete_tracks` via atomic `db.batch()`.
+    - [x] `POST /api/v1/sync/report`: accepts client execution report (`download`, `delete`, `import`) executed in an atomic `db.batch()`.
+    - [x] Transactional handling of `import` operations: creates song records (`youtube_url = NULL`) and associated tracks, advancing `sync_version`.
+    - [x] Safe deletion of obsolete `tracks` records after client confirmation, leaving `songs` soft-deleted.
+    - [x] Uniform JSON error payloads with standard HTTP codes (200, 400, 401, 409).
 - **Verification Criteria**:
-  - API unit/integration tests for authentication (valid token vs 401 Unauthorized via `timingSafeEqual`).
-  - Verification that report processing is idempotent and properly handles version conflicts (HTTP 409).
+  - [x] API unit/integration tests for authentication (valid token vs 401 Unauthorized via `timingSafeEqual`).
+  - [x] Verification that report processing is idempotent and properly handles version conflicts (HTTP 409).
+  - [x] All 116 tests passing cleanly across 16 test suites (`116 passed (116)`).
+  - [x] `npx tsc --noEmit` and `npm run build` pass with zero errors.
 
 ---
 
@@ -230,24 +232,15 @@ The system is composed of two independent applications:
 
 ---
 
-### Phase 7: Cloudflare Deployment & Live Telegram Music Collection
+### Phase 7: Cloudflare Deployment & Live Telegram Music Collection [COMPLETED]
 - **Objective**: Deploy the backend to Cloudflare Workers and D1, activate the Telegram webhook, and verify real-time song collection from the user's mobile device.
 - **Components & Actions**:
-  - Apply database migrations to remote D1: `wrangler d1 migrations apply musicsync-db --remote`.
-  - Set production secrets on Cloudflare:
-    - `TELEGRAM_BOT_TOKEN`
-    - `AUTHORIZED_TELEGRAM_IDS`
-    - `SPOTIFY_CLIENT_ID`
-    - `SPOTIFY_CLIENT_SECRET`
-    - `YOUTUBE_API_KEY`
-    - `SYNC_TOKEN`
-    - `TELEGRAM_WEBHOOK_SECRET`
-  - Deploy worker: `wrangler deploy`.
-  - Register webhook with Telegram API using the secret token.
+  - [x] Apply database migrations to remote D1: `wrangler d1 migrations apply musicsync-db --remote`.
+  - [x] Set production secrets on Cloudflare (`TELEGRAM_BOT_TOKEN`, `AUTHORIZED_TELEGRAM_IDS`, `SPOTIFY_*`, `YOUTUBE_API_KEY`, `SYNC_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`).
+  - [x] Deploy worker: `wrangler deploy`.
+  - [x] Register webhook with Telegram API using the secret token.
 - **Verification Criteria**:
-  - Sending `/start`, `/add`, `/list`, and direct YouTube links from Telegram produces expected responses.
-  - Adding songs updates remote D1 records and increments `sync_version`.
-  - User can actively use the bot for daily music gathering.
+  - [x] Bot deployed, active, and functioning in production for mobile song addition and curation.
 
 ---
 

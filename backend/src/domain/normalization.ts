@@ -66,7 +66,10 @@ export function detectVersionType(text: string): VersionType {
   }
 
   // Remix / Club Mix / VIP
-  if (/\b(?:remix|mix|club\s+mix|extended\s+mix|vip\s+mix)\b/i.test(lower)) {
+  if (
+    /\b(?:remix|club\s+mix|extended\s+mix|vip\s+mix|original\s+mix|summer\s+mix|dance\s+mix|dub\s+mix|radio\s+mix)\b/i.test(lower) ||
+    /[([][^\])]*\bmix\b[^\])]*[)\]]/i.test(lower)
+  ) {
     return VersionType.REMIX;
   }
 
@@ -122,4 +125,14 @@ export function calculateTokenOverlap(a: string, b: string): number {
 
   const union = new Set([...tokensA, ...tokensB]).size;
   return union > 0 ? intersection / union : 0;
+}
+
+/**
+ * Cleans YouTube channel names (e.g. "- Topic", "VEVO") to extract canonical artist name.
+ */
+export function cleanArtistName(raw?: string | null): string {
+  if (!raw) return 'Artista Sconosciuto';
+  let cleaned = raw.replace(/\s*-\s*Topic$/i, '').trim();
+  cleaned = cleaned.replace(/(?<=[a-zA-Z0-9])VEVO$/i, '').trim();
+  return cleaned.length > 0 ? cleaned : 'Artista Sconosciuto';
 }

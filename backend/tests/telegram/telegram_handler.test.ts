@@ -197,7 +197,7 @@ describe('TelegramBotHandler', () => {
           inline_keyboard: [
             [
               expect.objectContaining({ text: '✅ È questa', callback_data: 'add:ok' }),
-              expect.objectContaining({ text: '❌ No', callback_data: 'next:22222222222' }),
+              expect.objectContaining({ text: '❌ No', callback_data: 'next:2:2:22222222222' }),
             ],
           ],
         }),

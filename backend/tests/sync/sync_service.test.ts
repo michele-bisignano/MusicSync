@@ -26,19 +26,25 @@ describe('SyncService', () => {
     it('removes illegal characters', () => {
       expect(sanitizeFilenamePart('file<name>:"/\\|?*')).toBe('file name');
     });
+
+    it('safely escapes Windows reserved device names', () => {
+      expect(sanitizeFilenamePart('CON')).toBe('CON_');
+      expect(sanitizeFilenamePart('aux')).toBe('aux_');
+      expect(sanitizeFilenamePart('NUL')).toBe('NUL_');
+    });
   });
 
   describe('formatDefaultRelativePath', () => {
     it('formats standard song', () => {
-      expect(formatDefaultRelativePath('Daft Punk', 'Get Lucky')).toBe('Daft Punk - Get Lucky.mp3');
+      expect(formatDefaultRelativePath('Daft Punk', 'Get Lucky')).toBe('Get Lucky - Daft Punk.mp3');
     });
 
     it('adds version suffix if not standard and not in title', () => {
-      expect(formatDefaultRelativePath('Queen', 'We Will Rock You', VersionType.LIVE)).toBe('Queen - We Will Rock You (Live).mp3');
+      expect(formatDefaultRelativePath('Queen', 'We Will Rock You', VersionType.LIVE)).toBe('We Will Rock You - Queen (Live).mp3');
     });
 
     it('does not add suffix if already in title', () => {
-      expect(formatDefaultRelativePath('Queen', 'We Will Rock You (Live)', VersionType.LIVE)).toBe('Queen - We Will Rock You (Live).mp3');
+      expect(formatDefaultRelativePath('Queen', 'We Will Rock You (Live)', VersionType.LIVE)).toBe('We Will Rock You (Live) - Queen.mp3');
     });
   });
 
@@ -66,6 +72,31 @@ describe('SyncService', () => {
       expect(state.desired_tracks).toHaveLength(1);
       expect(state.desired_tracks[0].song_id).toBe(song.id);
       expect(state.desired_tracks[0].relative_path).toBe('Test Artist - Test Song.mp3');
+    });
+
+    it('disambiguates duplicate relative_paths among active songs without tracks', async () => {
+      const song1 = await songRepo.insert({
+        artist: 'Queen',
+        title: 'Song / Part 1',
+        normalized_artist: 'queen',
+        normalized_title: 'song/part1',
+        version_type: VersionType.STANDARD,
+        youtube_url: null,
+      }, '2023-01-01T00:00:00Z');
+
+      const song2 = await songRepo.insert({
+        artist: 'Queen',
+        title: 'Song: Part 1',
+        normalized_artist: 'queen',
+        normalized_title: 'song:part1',
+        version_type: VersionType.STANDARD,
+        youtube_url: null,
+      }, '2023-01-01T00:00:00Z');
+
+      const state = await service.getSyncState();
+      expect(state.desired_tracks).toHaveLength(2);
+      expect(state.desired_tracks[0].relative_path).toBe('Song Part 1 - Queen.mp3');
+      expect(state.desired_tracks[1].relative_path).toBe(`Song Part 1 - Queen (${song2.id}).mp3`);
     });
   });
 

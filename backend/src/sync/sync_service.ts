@@ -5,9 +5,9 @@ import {
   normalizeString,
   stripVideoClutter,
 } from '../domain/normalization.js';
-import { D1SongRepository } from '../persistence/song_repository.js';
-import { D1TrackRepository } from '../persistence/track_repository.js';
-import { D1SyncStateRepository } from '../persistence/sync_state_repository.js';
+import { D1SongRepository, mapSongRow, SongRow } from '../persistence/song_repository.js';
+import { D1TrackRepository, mapTrackRow, TrackRow } from '../persistence/track_repository.js';
+import { D1SyncStateRepository, mapSyncStateRow, SyncStateRow } from '../persistence/sync_state_repository.js';
 import { getCurrentIsoTimestamp } from '../persistence/d1_database.js';
 import { SyncStatus } from '../domain/sync_state.js';
 import {
@@ -46,16 +46,22 @@ export class SyncConflictError extends Error {
  */
 export function sanitizeFilenamePart(text: string): string {
   if (!text) return '';
-  return text
+  let sanitized = text
     .replace(/[<>:"/\\|?*\x00-\x1F]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/[. ]+$/, '');
+
+  if (/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$/i.test(sanitized)) {
+    sanitized = `${sanitized}_`;
+  }
+  return sanitized;
 }
 
 /**
  * Generates the canonical relative path for a desired song:
- * "Artist - Title.mp3" or "Artist - Title (Version).mp3"
+ * "Title - Artist.mp3" or "Title - Artist (Version).mp3"
+ * (Per REQUIREMENTS.md Section 32: Title - Artist.mp3)
  */
 export function formatDefaultRelativePath(
   artist: string,
@@ -74,7 +80,7 @@ export function formatDefaultRelativePath(
     }
   }
 
-  return `${cleanArtist} - ${cleanTitle}${versionSuffix}.mp3`;
+  return `${cleanTitle} - ${cleanArtist}${versionSuffix}.mp3`;
 }
 
 export class SyncService {
@@ -94,12 +100,29 @@ export class SyncService {
   }
 
   /**
-   * Retrieves a consistent snapshot of desired and obsolete tracks along with current sync_version.
+   * Retrieves an atomic, consistent snapshot of desired and obsolete tracks along with current sync_version.
    */
   async getSyncState(): Promise<SyncStateResponse> {
-    const syncState = await this.syncStateRepo.get();
-    const allSongs = await this.songRepo.listAll();
-    const allTracks = await this.trackRepo.listAll();
+    const [syncRes, songsRes, tracksRes] = await this.db.batch([
+      this.syncStateRepo.prepareGet(),
+      this.songRepo.prepareListAll(),
+      this.trackRepo.prepareListAll(),
+    ]);
+
+    let syncStateRow = syncRes.results?.[0] as SyncStateRow | undefined;
+    if (!syncStateRow) {
+      await this.syncStateRepo.get();
+      const retryRes = await this.db.batch([
+        this.syncStateRepo.prepareGet(),
+        this.songRepo.prepareListAll(),
+        this.trackRepo.prepareListAll(),
+      ]);
+      syncStateRow = retryRes[0].results?.[0] as SyncStateRow;
+    }
+
+    const syncState = mapSyncStateRow(syncStateRow);
+    const allSongs = (songsRes.results ?? []).map((r) => mapSongRow(r as unknown as SongRow));
+    const allTracks = (tracksRes.results ?? []).map((r) => mapTrackRow(r as unknown as TrackRow));
 
     const trackBySongId = new Map<number, (typeof allTracks)[0]>();
     for (const track of allTracks) {
@@ -111,13 +134,22 @@ export class SyncService {
       songById.set(song.id, song);
     }
 
+    const usedPaths = new Set<string>();
     const desiredTracks: DesiredTrackDto[] = [];
     for (const song of allSongs) {
       if (song.status === SongStatus.ACTIVE) {
         const track = trackBySongId.get(song.id);
-        const relativePath = track
+        let relativePath = track
           ? track.relative_path
           : formatDefaultRelativePath(song.artist, song.title, song.version_type);
+
+        if (usedPaths.has(relativePath.toLowerCase())) {
+          const extIdx = relativePath.lastIndexOf('.');
+          const base = extIdx !== -1 ? relativePath.slice(0, extIdx) : relativePath;
+          const ext = extIdx !== -1 ? relativePath.slice(extIdx) : '.mp3';
+          relativePath = `${base} (${song.id})${ext}`;
+        }
+        usedPaths.add(relativePath.toLowerCase());
 
         desiredTracks.push({
           song_id: song.id,
@@ -151,7 +183,7 @@ export class SyncService {
   }
 
   /**
-   * Validates and processes a sync report submitted by the client.
+   * Validates and processes a sync report submitted by the client atomically.
    * Handles download confirmations, safe deletions of obsolete tracks, and USB imports.
    */
   async processReport(rawReport: unknown): Promise<SyncReportResponse> {
@@ -252,6 +284,7 @@ export class SyncService {
     let songsImported = 0;
     let shouldAdvanceVersion = false;
     const now = getCurrentIsoTimestamp();
+    const batchStatements: D1PreparedStatement[] = [];
 
     for (const op of report.operations) {
       if (op.type === 'download') {
@@ -263,30 +296,32 @@ export class SyncService {
             // Check if another track has the same relative_path
             const trackWithPath = await this.trackRepo.findByRelativePath(relativePath);
             if (trackWithPath) {
-              await this.db
-                .prepare('UPDATE tracks SET song_id = ?, updated_at = ? WHERE id = ?')
-                .bind(song.id, now, trackWithPath.id)
-                .run();
+              batchStatements.push(
+                this.db
+                  .prepare('UPDATE tracks SET song_id = ?, updated_at = ? WHERE id = ?')
+                  .bind(song.id, now, trackWithPath.id)
+              );
             } else {
-              await this.trackRepo.insert(song.id, relativePath, now);
+              batchStatements.push(this.trackRepo.prepareInsert(song.id, relativePath, now));
             }
           } else if (existingTrack.relative_path !== relativePath) {
-            await this.db
-              .prepare('UPDATE tracks SET relative_path = ?, updated_at = ? WHERE id = ?')
-              .bind(relativePath, now, existingTrack.id)
-              .run();
+            batchStatements.push(
+              this.db
+                .prepare('UPDATE tracks SET relative_path = ?, updated_at = ? WHERE id = ?')
+                .bind(relativePath, now, existingTrack.id)
+            );
           }
           tracksConfirmed++;
         }
       } else if (op.type === 'delete') {
         const track = await this.trackRepo.findBySongId(op.song_id);
         if (track) {
-          await this.trackRepo.delete(track.id);
+          batchStatements.push(this.trackRepo.prepareDelete(track.id));
           tracksRemoved++;
         } else if (op.relative_path) {
           const trackByPath = await this.trackRepo.findByRelativePath(op.relative_path.trim());
           if (trackByPath) {
-            await this.trackRepo.delete(trackByPath.id);
+            batchStatements.push(this.trackRepo.prepareDelete(trackByPath.id));
             tracksRemoved++;
           }
         }
@@ -308,45 +343,56 @@ export class SyncService {
         );
 
         if (!existingSong) {
-          // Insert new song and associate track
-          const newSong = await this.songRepo.insert(
-            {
-              artist,
-              title,
-              normalized_artist: normalizedArtist,
-              normalized_title: normalizedTitle,
-              version_type: versionType,
-              youtube_url: youtubeUrl,
-            },
-            now
+          // Insert new song and associate track via last_insert_rowid()
+          batchStatements.push(
+            this.songRepo.prepareInsert(
+              {
+                artist,
+                title,
+                normalized_artist: normalizedArtist,
+                normalized_title: normalizedTitle,
+                version_type: versionType,
+                youtube_url: youtubeUrl,
+              },
+              now
+            )
           );
 
           const existingTrackByPath = await this.trackRepo.findByRelativePath(relativePath);
           if (existingTrackByPath) {
-            await this.db
-              .prepare('UPDATE tracks SET song_id = ?, updated_at = ? WHERE id = ?')
-              .bind(newSong.id, now, existingTrackByPath.id)
-              .run();
+            batchStatements.push(
+              this.db
+                .prepare('UPDATE tracks SET song_id = last_insert_rowid(), updated_at = ? WHERE id = ?')
+                .bind(now, existingTrackByPath.id)
+            );
           } else {
-            await this.trackRepo.insert(newSong.id, relativePath, now);
+            batchStatements.push(
+              this.db
+                .prepare(
+                  `INSERT INTO tracks (song_id, relative_path, created_at, updated_at)
+                   VALUES (last_insert_rowid(), ?, ?, ?)`
+                )
+                .bind(relativePath, now, now)
+            );
           }
 
           shouldAdvanceVersion = true;
           songsImported++;
         } else if (existingSong.status === SongStatus.REMOVED) {
           // Reactivate previously removed song
-          await this.songRepo.reactivate(existingSong.id, youtubeUrl, now);
+          batchStatements.push(this.songRepo.prepareReactivate(existingSong.id, youtubeUrl, now));
 
           const existingTrack = await this.trackRepo.findBySongId(existingSong.id);
           if (!existingTrack) {
             const existingTrackByPath = await this.trackRepo.findByRelativePath(relativePath);
             if (existingTrackByPath) {
-              await this.db
-                .prepare('UPDATE tracks SET song_id = ?, updated_at = ? WHERE id = ?')
-                .bind(existingSong.id, now, existingTrackByPath.id)
-                .run();
+              batchStatements.push(
+                this.db
+                  .prepare('UPDATE tracks SET song_id = ?, updated_at = ? WHERE id = ?')
+                  .bind(existingSong.id, now, existingTrackByPath.id)
+              );
             } else {
-              await this.trackRepo.insert(existingSong.id, relativePath, now);
+              batchStatements.push(this.trackRepo.prepareInsert(existingSong.id, relativePath, now));
             }
           }
           shouldAdvanceVersion = true;
@@ -357,12 +403,13 @@ export class SyncService {
           if (!existingTrack) {
             const existingTrackByPath = await this.trackRepo.findByRelativePath(relativePath);
             if (existingTrackByPath) {
-              await this.db
-                .prepare('UPDATE tracks SET song_id = ?, updated_at = ? WHERE id = ?')
-                .bind(existingSong.id, now, existingTrackByPath.id)
-                .run();
+              batchStatements.push(
+                this.db
+                  .prepare('UPDATE tracks SET song_id = ?, updated_at = ? WHERE id = ?')
+                  .bind(existingSong.id, now, existingTrackByPath.id)
+              );
             } else {
-              await this.trackRepo.insert(existingSong.id, relativePath, now);
+              batchStatements.push(this.trackRepo.prepareInsert(existingSong.id, relativePath, now));
             }
           }
           tracksConfirmed++;
@@ -371,14 +418,20 @@ export class SyncService {
     }
 
     if (shouldAdvanceVersion) {
-      await this.syncStateRepo.incrementVersion();
+      batchStatements.push(this.syncStateRepo.prepareIncrementVersion());
     }
 
-    await this.syncStateRepo.updateSyncCompletion(
-      report.status as SyncStatus,
-      null,
-      now
+    batchStatements.push(
+      this.syncStateRepo.prepareUpdateSyncCompletion(
+        report.status as SyncStatus,
+        null,
+        now
+      )
     );
+
+    if (batchStatements.length > 0) {
+      await this.db.batch(batchStatements);
+    }
 
     const updatedSyncState = await this.syncStateRepo.get();
 

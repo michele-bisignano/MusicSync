@@ -1,7 +1,7 @@
 import { SyncState, SyncStatus } from '../domain/sync_state.js';
 import { getCurrentIsoTimestamp } from './d1_database.js';
 
-interface SyncStateRow {
+export interface SyncStateRow {
   id: number;
   sync_version: number;
   last_sync_started_at: string | null;
@@ -21,6 +21,10 @@ export function mapSyncStateRow(row: SyncStateRow): SyncState {
 
 export class D1SyncStateRepository {
   constructor(private readonly db: D1Database) {}
+
+  prepareGet(): D1PreparedStatement {
+    return this.db.prepare('SELECT * FROM sync_state WHERE id = 1');
+  }
 
   async get(): Promise<SyncState> {
     let row = await this.db

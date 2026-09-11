@@ -1,7 +1,7 @@
 import { D1SongRepository } from '../persistence/song_repository.js';
 import { Song, SongStatus } from '../domain/song.js';
 import { VersionType } from '../domain/version_type.js';
-import { normalizeString } from '../domain/normalization.js';
+import { normalizeString, stripVideoClutter } from '../domain/normalization.js';
 
 export enum DuplicateStatus {
   NOT_FOUND = 'not_found',
@@ -27,7 +27,7 @@ export class DuplicateChecker {
     youtubeUrl?: string | null
   ): Promise<DuplicateCheckResult> {
     const normArtist = normalizeString(artist);
-    const normTitle = normalizeString(title);
+    const normTitle = normalizeString(stripVideoClutter(title));
 
     // 1. Check logical identity match: (normalized_artist, normalized_title, version_type)
     const existingByIdentity = await this.songRepo.findByIdentity(
@@ -38,6 +38,18 @@ export class DuplicateChecker {
 
     if (existingByIdentity) {
       if (existingByIdentity.status === SongStatus.REMOVED) {
+        // Verify that the requested youtubeUrl is not already assigned to another distinct active song
+        if (youtubeUrl) {
+          const existingByUrl = await this.songRepo.findByYouTubeUrl(youtubeUrl);
+          if (existingByUrl && existingByUrl.id !== existingByIdentity.id) {
+            return {
+              status: DuplicateStatus.URL_ALREADY_USED_BY_OTHER,
+              existingSong: existingByUrl,
+              reason: `L'URL YouTube è già associato a "${existingByUrl.artist} - ${existingByUrl.title}".`,
+            };
+          }
+        }
+
         return {
           status: DuplicateStatus.REMOVED,
           existingSong: existingByIdentity,

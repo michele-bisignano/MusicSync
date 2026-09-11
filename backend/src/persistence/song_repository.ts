@@ -2,7 +2,7 @@ import { Song, CreateSongInput, SongStatus } from '../domain/song.js';
 import { VersionType, parseVersionType } from '../domain/version_type.js';
 import { getCurrentIsoTimestamp } from './d1_database.js';
 
-interface SongRow {
+export interface SongRow {
   id: number;
   artist: string;
   title: string;
@@ -76,10 +76,12 @@ export class D1SongRepository {
     return (result.results ?? []).map(mapSongRow);
   }
 
+  prepareListAll(): D1PreparedStatement {
+    return this.db.prepare('SELECT * FROM songs ORDER BY id ASC');
+  }
+
   async listAll(): Promise<Song[]> {
-    const result = await this.db
-      .prepare('SELECT * FROM songs ORDER BY id ASC')
-      .all<SongRow>();
+    const result = await this.prepareListAll().all<SongRow>();
 
     return (result.results ?? []).map(mapSongRow);
   }

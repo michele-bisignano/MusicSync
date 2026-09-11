@@ -10,6 +10,21 @@ export interface ParsedCandidateMessage {
   youtube_url: string;
 }
 
+/**
+ * Escapes special characters for Telegram Markdown v1: _, *, `, [
+ */
+export function escapeMarkdown(text: string): string {
+  return text.replace(/([_*`\[])/g, '\\$1');
+}
+
+/**
+ * Escapes URL for display in Telegram Markdown v1.
+ * Bare URLs with underscores will cause parse errors in Markdown v1 unless escaped.
+ */
+export function escapeUrlMarkdown(url: string): string {
+  return url.replace(/([_*`\[])/g, '\\$1');
+}
+
 export function formatHelpMessage(): string {
   return (
     `🎵 *Benvenuto in MusicSync!*\n\n` +
@@ -32,21 +47,27 @@ export function formatCandidateMessage(
 ): string {
   return (
     `🎵 *Risultato trovato (${index} di ${total})*:\n\n` +
-    `👤 *Artista*: ${candidate.artist}\n` +
-    `🎶 *Titolo*: ${candidate.title}\n` +
-    `💿 *Versione*: ${candidate.version_type}\n` +
-    `🔗 ${candidate.youtube_url}\n\n` +
+    `👤 *Artista*: ${escapeMarkdown(candidate.artist)}\n` +
+    `🎶 *Titolo*: ${escapeMarkdown(candidate.title)}\n` +
+    `💿 *Versione*: ${escapeMarkdown(candidate.version_type)}\n` +
+    `🔗 ${escapeUrlMarkdown(candidate.youtube_url)}\n\n` +
     `È questa la canzone che desideri aggiungere?`
   );
 }
 
 export function formatCandidateKeyboard(
-  remainingVideoIds: string[]
+  remainingVideoIds: string[],
+  currentIndex?: number,
+  total?: number
 ): InlineKeyboardMarkup {
-  const nextCallbackData =
-    remainingVideoIds.length > 0
-      ? `next:${remainingVideoIds.join(':')}`
-      : 'next:none';
+  let nextCallbackData: string;
+  if (remainingVideoIds.length === 0) {
+    nextCallbackData = 'next:none';
+  } else if (currentIndex !== undefined && total !== undefined) {
+    nextCallbackData = `next:${currentIndex}:${total}:${remainingVideoIds.join(':')}`;
+  } else {
+    nextCallbackData = `next:${remainingVideoIds.join(':')}`;
+  }
 
   return {
     inline_keyboard: [
@@ -66,10 +87,10 @@ export function formatDirectYouTubeMessage(
 ): string {
   return (
     `🎵 *Brano identificato da YouTube*:\n\n` +
-    `👤 *Artista*: ${artist}\n` +
-    `🎶 *Titolo*: ${title}\n` +
-    `💿 *Versione*: ${version_type}\n` +
-    `🔗 ${youtube_url}\n\n` +
+    `👤 *Artista*: ${escapeMarkdown(artist)}\n` +
+    `🎶 *Titolo*: ${escapeMarkdown(title)}\n` +
+    `💿 *Versione*: ${escapeMarkdown(version_type)}\n` +
+    `🔗 ${escapeUrlMarkdown(youtube_url)}\n\n` +
     `Vuoi aggiungere questo brano alla tua libreria?`
   );
 }
@@ -88,9 +109,9 @@ export function formatDirectYouTubeKeyboard(): InlineKeyboardMarkup {
 export function formatRemovePromptMessage(song: Song): string {
   return (
     `⚠️ *Conferma rimozione*:\n\n` +
-    `👤 *Artista*: ${song.artist}\n` +
-    `🎶 *Titolo*: ${song.title}\n` +
-    `💿 *Versione*: ${song.version_type}\n\n` +
+    `👤 *Artista*: ${escapeMarkdown(song.artist)}\n` +
+    `🎶 *Titolo*: ${escapeMarkdown(song.title)}\n` +
+    `💿 *Versione*: ${escapeMarkdown(song.version_type)}\n\n` +
     `Sei sicuro di voler rimuovere questo brano dalla libreria attiva?`
   );
 }
@@ -117,7 +138,7 @@ export function formatLibraryListMessages(songs: Song[]): string[] {
 
   songs.forEach((s, idx) => {
     const versionLabel = s.version_type !== VersionType.STANDARD ? ` [${s.version_type}]` : '';
-    const line = `${idx + 1}. *${s.artist}* — ${s.title}${versionLabel}\n`;
+    const line = `${idx + 1}. *${escapeMarkdown(s.artist)}* — ${escapeMarkdown(s.title)}${versionLabel}\n`;
 
     // Max Telegram message length is 4096 characters. Keep margin.
     if (currentChunk.length + line.length > 3800) {
@@ -146,10 +167,10 @@ export function parseCandidateFromMessage(text: string | undefined): ParsedCandi
     return null;
   }
 
-  const artist = artistMatch[1].replace(/\*/g, '').trim();
-  const title = titleMatch[1].replace(/\*/g, '').trim();
-  const rawVersion = versionMatch ? versionMatch[1].replace(/\*/g, '').trim().toLowerCase() : 'standard';
-  const youtube_url = urlMatch[1].trim();
+  const artist = artistMatch[1].replace(/[*_\\`\[]/g, '').trim();
+  const title = titleMatch[1].replace(/[*_\\`\[]/g, '').trim();
+  const rawVersion = versionMatch ? versionMatch[1].replace(/[*_\\`\[]/g, '').trim().toLowerCase() : 'standard';
+  const youtube_url = urlMatch[1].replace(/\\/g, '').trim();
 
   let version_type = VersionType.STANDARD;
   if (rawVersion.includes('cover')) version_type = VersionType.COVER;

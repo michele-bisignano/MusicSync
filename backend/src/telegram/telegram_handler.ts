@@ -11,6 +11,7 @@ import {
   detectVersionType,
   parseArtistAndTitle,
   calculateTokenOverlap,
+  cleanArtistName,
 } from '../domain/normalization.js';
 import {
   formatHelpMessage,
@@ -22,6 +23,7 @@ import {
   formatRemoveKeyboard,
   formatLibraryListMessages,
   parseCandidateFromMessage,
+  escapeMarkdown,
 } from './telegram_formatter.js';
 import { VersionType } from '../domain/version_type.js';
 
@@ -108,7 +110,7 @@ export class TelegramBotHandler {
       return;
     }
 
-    // 3. Reject candidate, request next (format: next:vid1:vid2... or next:none)
+    // 3. Reject candidate, request next (format: next:index:total:vid1:vid2... or next:vid1:vid2... or next:none)
     if (data.startsWith('next:')) {
       await this.telegramClient.answerCallbackQuery(query.id);
       const parts = data.slice(5).split(':').filter(Boolean);
@@ -123,8 +125,23 @@ export class TelegramBotHandler {
         return;
       }
 
-      const nextVideoId = parts[0];
-      const remainingIds = parts.slice(1);
+      let currentIndex = 2;
+      let total = 3;
+      let nextVideoId = parts[0];
+      let remainingIds = parts.slice(1);
+
+      if (parts.length >= 3 && /^\d+$/.test(parts[0]) && /^\d+$/.test(parts[1])) {
+        currentIndex = parseInt(parts[0], 10);
+        total = parseInt(parts[1], 10);
+        nextVideoId = parts[2];
+        remainingIds = parts.slice(3);
+      } else if (parts.length >= 1) {
+        currentIndex = 2;
+        total = parts.length + 1;
+        nextVideoId = parts[0];
+        remainingIds = parts.slice(1);
+      }
+
       const nextUrl = `https://www.youtube.com/watch?v=${nextVideoId}`;
 
       try {
@@ -134,15 +151,15 @@ export class TelegramBotHandler {
         }
         const parsed = parseArtistAndTitle(source.title);
         const version_type = detectVersionType(source.title);
-        const artist = parsed?.artist || source.channel_title || 'Artista Sconosciuto';
+        const artist = parsed?.artist || cleanArtistName(source.channel_title) || 'Artista Sconosciuto';
         const title = parsed?.title || stripVideoClutter(source.title);
 
         const nextMessage = formatCandidateMessage(
           { artist, title, version_type, youtube_url: nextUrl },
-          2, // sequential candidate presentation
-          3
+          currentIndex,
+          total
         );
-        const nextKeyboard = formatCandidateKeyboard(remainingIds);
+        const nextKeyboard = formatCandidateKeyboard(remainingIds, currentIndex + 1, total);
 
         await this.telegramClient.editMessageText(chatId, messageId, nextMessage, {
           parse_mode: 'Markdown',
@@ -233,7 +250,7 @@ export class TelegramBotHandler {
         }
         const parsed = parseArtistAndTitle(source.title);
         const version_type = detectVersionType(source.title);
-        const artist = parsed?.artist || source.channel_title || 'Artista Sconosciuto';
+        const artist = parsed?.artist || cleanArtistName(source.channel_title) || 'Artista Sconosciuto';
         const title = parsed?.title || stripVideoClutter(source.title);
 
         const res = await this.libraryService.forceAddSong({
@@ -245,7 +262,7 @@ export class TelegramBotHandler {
 
         await this.telegramClient.sendMessage(
           chatId,
-          `⚡ *Brano forzato/aggiornato con successo*:\n"${res.song.artist} — ${res.song.title}" (${res.song.version_type})`,
+          `⚡ *Brano forzato/aggiornato con successo*:\n"${escapeMarkdown(res.song.artist)} — ${escapeMarkdown(res.song.title)}" (${escapeMarkdown(res.song.version_type)})`,
           { parse_mode: 'Markdown' }
         );
       } catch (err: unknown) {
@@ -316,7 +333,7 @@ export class TelegramBotHandler {
         }
         const parsed = parseArtistAndTitle(source.title);
         const version_type = detectVersionType(source.title);
-        const artist = parsed?.artist || source.channel_title || 'Artista Sconosciuto';
+        const artist = parsed?.artist || cleanArtistName(source.channel_title) || 'Artista Sconosciuto';
         const title = parsed?.title || stripVideoClutter(source.title);
 
         await this.telegramClient.sendMessage(
@@ -343,7 +360,7 @@ export class TelegramBotHandler {
       if (candidates.length === 0) {
         await this.telegramClient.sendMessage(
           chatId,
-          `❌ Nessun risultato trovato per "*${searchQuery}*".\n\nProva a descrivere il brano in modo più preciso oppure incolla direttamente il link di YouTube.`,
+          `❌ Nessun risultato trovato per "*${escapeMarkdown(searchQuery)}*".\n\nProva a descrivere il brano in modo più preciso oppure incolla direttamente il link di YouTube.`,
           { parse_mode: 'Markdown' }
         );
         return;
@@ -353,7 +370,7 @@ export class TelegramBotHandler {
       const remainingVideoIds = candidates.slice(1).map((c) => c.video_id);
 
       const msg = formatCandidateMessage(firstCandidate, 1, candidates.length);
-      const keyboard = formatCandidateKeyboard(remainingVideoIds);
+      const keyboard = formatCandidateKeyboard(remainingVideoIds, 2, candidates.length);
 
       await this.telegramClient.sendMessage(chatId, msg, {
         parse_mode: 'Markdown',

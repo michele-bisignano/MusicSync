@@ -3,7 +3,7 @@ import { D1SyncStateRepository } from '../persistence/sync_state_repository.js';
 import { DuplicateChecker, DuplicateStatus } from './duplicate_checker.js';
 import { Song, SongStatus, CreateSongInput } from '../domain/song.js';
 import { VersionType } from '../domain/version_type.js';
-import { normalizeString } from '../domain/normalization.js';
+import { normalizeString, stripVideoClutter } from '../domain/normalization.js';
 import { getCurrentIsoTimestamp } from '../persistence/d1_database.js';
 
 export interface AddSongResult {
@@ -109,11 +109,14 @@ export class LibraryService {
     }
 
     // New song insertion: atomic batch with sync_version increment
+    const cleanTitle = stripVideoClutter(input.title.trim());
+    const finalTitle = cleanTitle.length > 0 ? cleanTitle : input.title.trim();
+
     const songInput: CreateSongInput = {
       artist: input.artist.trim(),
-      title: input.title.trim(),
+      title: finalTitle,
       normalized_artist: normalizeString(input.artist),
-      normalized_title: normalizeString(input.title),
+      normalized_title: normalizeString(finalTitle),
       version_type: input.version_type,
       youtube_url: input.youtube_url ?? null,
     };
@@ -148,9 +151,28 @@ export class LibraryService {
     version_type: VersionType;
     youtube_url: string;
   }): Promise<ForceAddSongResult> {
+    const cleanTitle = stripVideoClutter(input.title.trim());
+    const finalTitle = cleanTitle.length > 0 ? cleanTitle : input.title.trim();
     const normArtist = normalizeString(input.artist);
-    const normTitle = normalizeString(input.title);
+    const normTitle = normalizeString(finalTitle);
     const now = getCurrentIsoTimestamp();
+
+    // Check if the target youtube_url is already assigned to ANOTHER distinct active song
+    if (input.youtube_url) {
+      const existingByUrl = await this.songRepo.findByYouTubeUrl(input.youtube_url);
+      if (existingByUrl && existingByUrl.status !== SongStatus.REMOVED) {
+        const existingById = await this.songRepo.findByIdentity(
+          normArtist,
+          normTitle,
+          input.version_type
+        );
+        if (!existingById || existingById.id !== existingByUrl.id) {
+          throw new Error(
+            `L'URL YouTube è già associato a un altro brano attivo: "${existingByUrl.artist} - ${existingByUrl.title}".`
+          );
+        }
+      }
+    }
 
     const existing = await this.songRepo.findByIdentity(
       normArtist,
@@ -195,7 +217,10 @@ export class LibraryService {
     }
 
     // Song does not exist yet: insert normally
-    const addResult = await this.addSong(input);
+    const addResult = await this.addSong({
+      ...input,
+      title: finalTitle,
+    });
     return {
       song: addResult.song,
       status: 'added',

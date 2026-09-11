@@ -1,7 +1,7 @@
 import { Track } from '../domain/track.js';
 import { getCurrentIsoTimestamp } from './d1_database.js';
 
-interface TrackRow {
+export interface TrackRow {
   id: number;
   song_id: number;
   relative_path: string;
@@ -49,10 +49,12 @@ export class D1TrackRepository {
     return row ? mapTrackRow(row) : null;
   }
 
+  prepareListAll(): D1PreparedStatement {
+    return this.db.prepare('SELECT * FROM tracks ORDER BY id ASC');
+  }
+
   async listAll(): Promise<Track[]> {
-    const result = await this.db
-      .prepare('SELECT * FROM tracks ORDER BY id ASC')
-      .all<TrackRow>();
+    const result = await this.prepareListAll().all<TrackRow>();
 
     return (result.results ?? []).map(mapTrackRow);
   }

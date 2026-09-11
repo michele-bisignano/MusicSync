@@ -1,13 +1,12 @@
 ```text
-MusicSync/
-├── .claude/
-│   └── settings.local.json
+applet/
 ├── .gitignore
 ├── backend/
 │   ├── deploy_setup.sh
 │   ├── migrations/
 │   │   └── 0001_initial.sql
 │   ├── package-lock.json
+│   ├── package.json
 │   ├── src/
 │   │   ├── domain/
 │   │   │   ├── normalization.ts
@@ -108,7 +107,9 @@ MusicSync/
 │   │   └── repository_tree.md
 │   └── PROJECT_STRUCTURE.md
 ├── LICENSE
+├── metadata.json
 ├── package-lock.json
+├── package.json
 ├── public/
 │   └── MusicSync_icon.png
 ├── tools/
