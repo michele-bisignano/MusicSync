@@ -145,7 +145,7 @@ class BackendClient:
         except Exception:
             data = {"raw_text": response.text}
 
-        if response.status_code == 200:
+        if 200 <= response.status_code < 300:
             return data
 
         error_message = (

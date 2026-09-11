@@ -137,7 +137,7 @@ export function formatLibraryListMessages(songs: Song[]): string[] {
   let currentChunk = header;
 
   songs.forEach((s, idx) => {
-    const versionLabel = s.version_type !== VersionType.STANDARD ? ` [${s.version_type}]` : '';
+    const versionLabel = s.version_type !== VersionType.STANDARD ? ` (${escapeMarkdown(s.version_type)})` : '';
     const line = `${idx + 1}. *${escapeMarkdown(s.artist)}* — ${escapeMarkdown(s.title)}${versionLabel}\n`;
 
     // Max Telegram message length is 4096 characters. Keep margin.
@@ -167,9 +167,9 @@ export function parseCandidateFromMessage(text: string | undefined): ParsedCandi
     return null;
   }
 
-  const artist = artistMatch[1].replace(/[*_\\`\[]/g, '').trim();
-  const title = titleMatch[1].replace(/[*_\\`\[]/g, '').trim();
-  const rawVersion = versionMatch ? versionMatch[1].replace(/[*_\\`\[]/g, '').trim().toLowerCase() : 'standard';
+  const artist = artistMatch[1].replace(/\\/g, '').trim();
+  const title = titleMatch[1].replace(/\\/g, '').trim();
+  const rawVersion = versionMatch ? versionMatch[1].replace(/\\/g, '').trim().toLowerCase() : 'standard';
   const youtube_url = urlMatch[1].replace(/\\/g, '').trim();
 
   let version_type = VersionType.STANDARD;

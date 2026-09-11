@@ -72,6 +72,21 @@ class SyncPlanner:
                 ]
                 if candidates:
                     matched_track = candidates[0]
+            # Third, try inverted SongIdentity (Title - Artist vs Artist - Title filename variations)
+            else:
+                inverted_identity = SongIdentity(
+                    normalized_artist=desired_identity.normalized_title,
+                    normalized_title=desired_identity.normalized_artist,
+                    version_type=desired.version_type,
+                )
+                if inverted_identity in physical_by_identity:
+                    candidates = [
+                        t
+                        for t in physical_by_identity[inverted_identity]
+                        if t.relative_path.lower() not in matched_physical_paths
+                    ]
+                    if candidates:
+                        matched_track = candidates[0]
 
             if matched_track is not None:
                 matched_physical_paths.add(matched_track.relative_path.lower())

@@ -1,4 +1,4 @@
-import { D1SongRepository } from '../persistence/song_repository.js';
+import { D1SongRepository, mapSongRow, SongRow } from '../persistence/song_repository.js';
 import { D1SyncStateRepository } from '../persistence/sync_state_repository.js';
 import { DuplicateChecker, DuplicateStatus } from './duplicate_checker.js';
 import { Song, SongStatus, CreateSongInput } from '../domain/song.js';
@@ -125,11 +125,11 @@ export class LibraryService {
     const incStmt = this.syncRepo.prepareIncrementVersion();
 
     const [insertRes, incRes] = await this.db.batch([insertStmt, incStmt]);
-    const returnedRow = insertRes.results?.[0] as unknown as Song | undefined;
-    const songId = returnedRow?.id ?? Number((insertRes.meta as { last_row_id?: number })?.last_row_id);
+    const rawSongRow = insertRes.results?.[0] as unknown as SongRow | undefined;
+    const songId = rawSongRow ? Number(rawSongRow.id) : Number((insertRes.meta as { last_row_id?: number })?.last_row_id);
     const newVersion = Number((incRes.results?.[0] as { sync_version: number })?.sync_version);
 
-    const created = (await this.songRepo.findById(songId)) ?? returnedRow;
+    const created = (rawSongRow ? mapSongRow(rawSongRow) : null) ?? (await this.songRepo.findById(songId));
     if (!created) {
       throw new Error('Impossibile recuperare il brano inserito');
     }

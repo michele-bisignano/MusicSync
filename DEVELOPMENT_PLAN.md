@@ -58,7 +58,7 @@ The system is composed of two independent applications:
     │
 [Phase 8] Python Client — USB Scanner & Existing Library Cataloging (--import-usb) [COMPLETATA]
     │
-[Phase 9] Python Client — Full Sync Planner & Executor (yt-dlp, FFmpeg, ID3v2.3)
+[Phase 9] Python Client — Full Sync Planner & Executor (yt-dlp, FFmpeg, ID3v2.3) [COMPLETATA]
 ```
 
 ---
@@ -290,4 +290,3 @@ The system is composed of two independent applications:
 | **M3: Live Music Collection** | Phase 7 | Worker deployed to Cloudflare, user can search and manage songs via Telegram. |
 | **M4: USB Cataloging** | Phase 8 | Existing USB MP3s imported into D1 via `--import-usb`, visible in Telegram. |
 | **M5: Physical Sync Engine** | Phase 9 | Full reconciliation working: downloads via `yt-dlp`, safe deletions, ID3v2.3 tags. |
-# Test change

@@ -165,11 +165,11 @@ export class SyncService {
     const obsoleteTracks: ObsoleteTrackDto[] = [];
     for (const track of allTracks) {
       const song = songById.get(track.song_id);
-      if (song && song.status === SongStatus.REMOVED) {
+      if (!song || song.status === SongStatus.REMOVED) {
         obsoleteTracks.push({
-          song_id: song.id,
-          artist: song.artist,
-          title: song.title,
+          song_id: song ? song.id : track.song_id,
+          artist: song ? song.artist : 'Unknown Artist',
+          title: song ? song.title : 'Unknown Title',
           relative_path: track.relative_path,
         });
       }
