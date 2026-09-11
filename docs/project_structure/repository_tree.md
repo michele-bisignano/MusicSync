@@ -82,23 +82,41 @@ MusicSync/
 ├── bun.lock
 ├── CLAUDE.md
 ├── client/
+│   ├── config.example.toml
+│   ├── pyproject.toml
+│   ├── requirements.txt
 │   ├── src/
 │   │   └── music_sync/
+│   │       ├── __init__.py
+│   │       ├── __main__.py
 │   │       ├── application/
-│   │       │   └── .gitkeep
+│   │       │   ├── __init__.py
+│   │       │   └── importer.py
 │   │       ├── cli/
-│   │       │   └── .gitkeep
+│   │       │   ├── __init__.py
+│   │       │   ├── main.py
+│   │       │   └── parser.py
+│   │       ├── config.py
 │   │       ├── domain/
-│   │       │   └── .gitkeep
+│   │       │   ├── __init__.py
+│   │       │   ├── filename_parser.py
+│   │       │   ├── models.py
+│   │       │   └── normalization.py
 │   │       └── infrastructure/
-│   │           └── .gitkeep
+│   │           ├── __init__.py
+│   │           ├── backend_client.py
+│   │           └── filesystem.py
 │   └── tests/
 │       ├── application/
-│       │   └── .gitkeep
+│       │   └── test_importer.py
+│       ├── cli/
+│       │   └── test_cli.py
 │       ├── domain/
-│       │   └── .gitkeep
+│       │   ├── test_filename_parser.py
+│       │   └── test_normalization.py
 │       └── infrastructure/
-│           └── .gitkeep
+│           ├── test_backend_client.py
+│           └── test_filesystem.py
 ├── DEVELOPMENT_PLAN.md
 ├── docs/
 │   ├── design/
@@ -115,6 +133,7 @@ MusicSync/
 ├── package.json
 ├── public/
 │   └── MusicSync_icon.png
+├── requirements.txt
 ├── tools/
 │   └── project_tree/
 │       ├── generate_tree.py

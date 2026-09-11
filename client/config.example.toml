@@ -1,0 +1,17 @@
+# MusicSync Client Configuration Example
+# Copy this file to `config.toml` (or set the corresponding environment variables)
+
+# URL of the Cloudflare Worker backend (e.g. https://musicsync.example.workers.dev)
+backend_url = "https://your-worker.workers.dev"
+
+# Pre-shared secret token for API authentication (matches SYNC_TOKEN on backend)
+sync_token = "your-sync-token-here"
+
+# Path to the root of your physical USB drive
+# Windows example: "D:\\" or "E:\\"
+# Linux example: "/media/user/USB_DRIVE"
+usb_path = "D:\\"
+
+# Managed music subfolder inside the USB drive (relative to usb_path)
+# Operations will strictly be isolated to this folder.
+managed_folder = "Music"
