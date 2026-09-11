@@ -1,5 +1,7 @@
 ```text
-applet/
+MusicSync/
+├── .claude/
+│   └── settings.local.json
 ├── .gitignore
 ├── backend/
 │   ├── deploy_setup.sh
