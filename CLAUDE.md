@@ -157,7 +157,3 @@ client/
 ## Non-Goals (First Version)
 
 No GUI, web UI, mobile app, streaming, multiple USBs, playlists, AI, continuous polling, Windows service, background daemon, complex auth, microservices, Redis, WebSockets, event sourcing, CQRS.
-
----
-
-*(Note: Temporary `.gitkeep` files are placed in empty directory skeletons. They must be removed as each folder gets populated with actual source files. Once all `.gitkeep` files are removed, this note must also be deleted from `CLAUDE.md`)*

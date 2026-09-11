@@ -32,8 +32,8 @@ const CLUTTER_PATTERNS: RegExp[] = [
   /\[(?:official\s+)?lyric(?:s)?(?:\s+video)?\]/gi,
   /\(videoclip\s+ufficiale\)/gi,
   /\[videoclip\s+ufficiale\]/gi,
-  /\((?:hd|4k|hq|remastered|visualizer)\)/gi,
-  /\[(?:hd|4k|hq|remastered|visualizer)\]/gi,
+  /\((?:hd|4k|hq|remastered|visualizer|hd\s+remastered|4k\s+remastered)\)/gi,
+  /\[(?:hd|4k|hq|remastered|visualizer|hd\s+remastered|4k\s+remastered)\]/gi,
   /\b(?:official\s+video|official\s+music\s+video|official\s+audio|lyric\s+video)\b/gi,
   /\b(?:video\s+ufficiale|testo)\b/gi,
 ];

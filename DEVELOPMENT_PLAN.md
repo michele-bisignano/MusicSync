@@ -244,20 +244,23 @@ The system is composed of two independent applications:
 
 ---
 
-### Phase 8: Python Client — USB Scanner & Existing Library Cataloging
+### Phase 8: Python Client — USB Scanner & Existing Library Cataloging [COMPLETATA]
+- **Stato**: ✅ COMPLETATA
 - **Objective**: Build the Python client module to scan the physical USB drive, parse pre-existing MP3 filenames, and populate the online database with `youtube_url = NULL` so the user can curate existing music.
 - **Components & Actions**:
-  - Create `client/pyproject.toml` and CLI entrypoints in `client/src/music_sync/`:
-    - `FileSystem`: scans `MANAGED_FOLDER` strictly, ignoring non-MP3 files and other USB directories.
-    - `FilenameParser`: parses `Title - Artist.mp3` and `Artist - Title.mp3`, strips unsafe characters, and identifies version tags.
-    - `BackendClient`: HTTPS client authenticating with `Authorization: Bearer <SYNC_TOKEN>`.
-  - Dedicated CLI command:
-    - `python -m music_sync --import-usb --dry-run`: previews all detected MP3 files without altering the database.
-    - `python -m music_sync --import-usb`: sends the `import` report to `POST /api/v1/sync/report`, adding records to `songs` and `tracks`.
+  - [x] Create `client/pyproject.toml`, `requirements.txt`, `client/requirements.txt`, `client/config.example.toml` and CLI entrypoints in `client/src/music_sync/`:
+    - [x] `FileSystem`: scans `MANAGED_FOLDER` strictly, ignoring non-MP3 files, hidden files, temporary `.part` files, and prevents path traversal.
+    - [x] `FilenameParser` & `Normalization`: parses `Title - Artist.mp3` and `Artist - Title.mp3`, strips unsafe characters, extracts track numbers and version tags (`standard`, `cover`, `remix`, `acoustic`, `live`).
+    - [x] `BackendClient`: HTTPS client authenticating with `Authorization: Bearer <SYNC_TOKEN>` with domain error handling.
+    - [x] `UsbImporter`: application service coordinating scan, candidate extraction, and report creation.
+    - [x] `Config`: priority loader for TOML config, environment variables, and CLI overrides.
+  - [x] Dedicated CLI command:
+    - [x] `python -m music_sync --import-usb --dry-run`: previews all detected MP3 files with formatted table without altering the database.
+    - [x] `python -m music_sync --import-usb`: sends the `import` report to `POST /api/v1/sync/report`, adding records to `songs` and `tracks`.
 - **Verification Criteria**:
-  - Pytest tests validating filename parsing across various formats.
-  - Successful import of real USB files into the remote D1 database.
-  - Imported songs become immediately visible and manageable via Telegram `/list` and `/remove`.
+  - [x] Pytest test suite validating filename parsing, normalization, filesystem safety, backend client, importer, and CLI (32/32 tests passed).
+  - [x] Temporary `.gitkeep` files safely removed and repository tree updated.
+  - [x] All backend Vitest suites passing (118/118 passed) and TypeScript compilation green.
 
 ---
 

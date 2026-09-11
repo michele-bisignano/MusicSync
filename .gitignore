@@ -5,10 +5,16 @@
 *.local
 secrets.json
 secrets.*
+config.toml
+client/config.toml
 config.local.toml
+client/config.local.toml
 config.local.json
-config.py
+/config.py
+config.local.py
 config.json
+!client/config.example.toml
+!client/src/music_sync/config.py
 dev.vars
 
 # Backend (Cloudflare Worker / Node)
