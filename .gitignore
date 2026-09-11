@@ -45,7 +45,6 @@ Thumbs.db
 *.swp
 *.swo
 
-# Google AI Studio container
-metadata.json
-package.json
+# Google AI Studio container / preview wrapper
+server.ts
 server.js

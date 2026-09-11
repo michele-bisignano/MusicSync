@@ -256,7 +256,7 @@ The system is composed of two independent applications:
 - **Components & Actions**:
   - Create `client/pyproject.toml` and CLI entrypoints in `client/src/music_sync/`:
     - `FileSystem`: scans `MANAGED_FOLDER` strictly, ignoring non-MP3 files and other USB directories.
-    - `FilenameParser`: parses `Artist - Title.mp3`, strips unsafe characters, and identifies version tags.
+    - `FilenameParser`: parses `Title - Artist.mp3` and `Artist - Title.mp3`, strips unsafe characters, and identifies version tags.
     - `BackendClient`: HTTPS client authenticating with `Authorization: Bearer <SYNC_TOKEN>`.
   - Dedicated CLI command:
     - `python -m music_sync --import-usb --dry-run`: previews all detected MP3 files without altering the database.
@@ -273,7 +273,7 @@ The system is composed of two independent applications:
 - **Components & Actions**:
   - In `client/src/music_sync/`:
     - `SyncPlanner`: compares `DesiredState` with `PhysicalState`, producing deterministic plans (`KEEP`, `DOWNLOAD`, `DELETE`, `WARN_MISSING_SOURCE`).
-    - `YtDlpDownloader`: invokes `yt-dlp` and `FFmpeg` with `shell=False`, downloads sequentially, uses `.part` temporary files, and tags MP3s with car-stereo-compatible ID3v2.3 tags (artist, title, version).
+    - `YtDlpDownloader`: invokes `yt-dlp` and `FFmpeg` with `shell=False`, downloads sequentially, uses `Title - Artist.mp3.part` temporary files, saves final canonical files as `Title - Artist.mp3` (distributing artists across alphabetical playback order on car stereos), and tags MP3s with car-stereo-compatible ID3v2.3 tags (artist, title, version).
     - `SyncExecutor`: executes downloads, securely removes confirmed obsolete tracks, and posts final status to `POST /api/v1/sync/report`.
     - CLI options: `python -m music_sync` (full sync) and `python -m music_sync --dry-run` (detailed preview table).
 - **Verification Criteria**:

@@ -1000,8 +1000,10 @@ controlled rename
 Final name:
 
 ``` text
-Artist - Title.mp3
+Title - Artist.mp3
 ```
+
+*(Configured as `Title - Artist.mp3` so that car stereos and media players sorting alphabetically by filename do not play songs from the same artist consecutively).*
 
 Unsafe path characters are sanitized.
 
@@ -1017,13 +1019,13 @@ A download must not create a file that looks complete before success.
 Example:
 
 ``` text
-Artist - Song.mp3.part
+Title - Song.mp3.part
 ```
 
 Only after success:
 
 ``` text
-Artist - Song.mp3
+Title - Song.mp3
 ```
 
 If the process stops, the next run can detect temporary state and

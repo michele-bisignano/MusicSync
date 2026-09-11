@@ -384,11 +384,12 @@ The first synchronization must not assume that the database is empty.
 
 The client scans the managed folder and attempts to identify MP3 files.
 
-A common filename format is:
+A common filename format found on existing USB drives is:
 
 ``` text
 Artist - Title.mp3
 ```
+(or `Title - Artist.mp3`). The scanner and importer must support both conventions when cataloging pre-existing files.
 
 If identification succeeds:
 
@@ -978,13 +979,13 @@ Downloads must use temporary/incomplete files.
 Example:
 
 ``` text
-Artist - Song.mp3.part
+Title - Artist.mp3.part
 ```
 
 Only after successful completion should the final filename exist:
 
 ``` text
-Artist - Song.mp3
+Title - Artist.mp3
 ```
 
 A `.part` file is never considered a completed managed Track.
@@ -998,10 +999,12 @@ The next run must be able to recover safely.
 Expected canonical filename:
 
 ``` text
-Artist - Title.mp3
+Title - Artist.mp3
 ```
 
-Unsafe filesystem characters must be sanitized.
+**Rationale:** Many car stereos, media players, and simple USB hardware players sort tracks strictly by filename in alphabetical order. Saving as `Title - Artist.mp3` naturally distributes songs across different artists instead of clustering multiple songs from the same artist consecutively (as would happen with `Artist - Title.mp3`).
+
+Unsafe filesystem characters must be sanitized (e.g. `\`, `/`, `:`, `*`, `?`, `"`, `<`, `>`, `|`).
 
 The implementation must ensure that generated paths remain inside the
 configured managed folder.

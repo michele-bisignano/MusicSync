@@ -1,0 +1,6 @@
+{
+  "name": "MusicSync",
+  "description": "A lightweight, open-source music library synchronizer controlled through Telegram",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

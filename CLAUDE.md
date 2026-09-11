@@ -9,6 +9,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Online Backend**: Cloudflare Worker (TypeScript) + Cloudflare D1 (SQLite) — handles Telegram bot, YouTube search, library management, sync API
 - **Windows Sync Client**: Python — manually launched, uses yt-dlp + FFmpeg, syncs desired library with physical USB drive
 
+> **Nota importante sul Frontend**: In questa versione del progetto **non è presente alcun frontend web o GUI**. L'interfaccia utente è esclusivamente il bot Telegram, e la sincronizzazione avviene tramite il client Python per Windows. Non bisogna assolutamente perdere tempo ad implementare interfacce grafiche, web UI o frontend non richiesti.
+
 The backend is the source of truth for the **desired library**. The Windows client reconciles it with the **physical USB state**.
 
 ---

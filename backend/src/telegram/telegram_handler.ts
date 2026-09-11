@@ -369,7 +369,24 @@ export class TelegramBotHandler {
   }
 
   private findBestSongMatch(query: string, songs: Song[]): Song | null {
-    const qLower = query.toLowerCase();
+    const trimmed = query.trim();
+    const cleanNumQuery = trimmed.replace(/^#/, '');
+
+    // 1. If query is a number (e.g. "1" or "#1"), resolve against 1-based list index or ID
+    if (/^\d+$/.test(cleanNumQuery)) {
+      const num = parseInt(cleanNumQuery, 10);
+      // Check 1-based position as shown in /list (e.g. 1. Artist - Title)
+      if (num >= 1 && num <= songs.length) {
+        return songs[num - 1];
+      }
+      // Fallback: check if matches song.id directly
+      const byId = songs.find((s) => s.id === num);
+      if (byId) {
+        return byId;
+      }
+    }
+
+    const qLower = trimmed.toLowerCase();
     let bestMatch: Song | null = null;
     let highestScore = 0;
 
@@ -379,7 +396,7 @@ export class TelegramBotHandler {
         return song; // Direct substring match
       }
 
-      const score = calculateTokenOverlap(query, full);
+      const score = calculateTokenOverlap(trimmed, full);
       if (score > highestScore && score >= 0.4) {
         highestScore = score;
         bestMatch = song;

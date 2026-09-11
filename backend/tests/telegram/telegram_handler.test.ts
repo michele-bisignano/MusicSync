@@ -418,4 +418,80 @@ describe('TelegramBotHandler', () => {
     const activeAfter = await libraryService.listActiveSongs();
     expect(activeAfter.length).toBe(0);
   });
+
+  it('handles /rimuovi <index> using list numbering (e.g. /rimuovi 1)', async () => {
+    // 1. Add two songs
+    const song1 = await libraryService.addSong({
+      artist: 'Sereb Brancale',
+      title: 'Al mio paese',
+      version_type: VersionType.STANDARD,
+      youtube_url: 'https://www.youtube.com/watch?v=sereb123',
+    });
+    const song2 = await libraryService.addSong({
+      artist: 'Coldplay',
+      title: 'Yellow',
+      version_type: VersionType.STANDARD,
+      youtube_url: 'https://www.youtube.com/watch?v=yellow123',
+    });
+
+    // In /list, songs are ordered alphabetically: 1 is Coldplay, 2 is Sereb Brancale
+    // 2. Request removal by index '1' (Coldplay)
+    const updateRemove: TelegramUpdate = {
+      update_id: 12,
+      message: {
+        message_id: 12,
+        date: 1000,
+        chat: { id: AUTHORIZED_USER_ID, type: 'private' },
+        from: { id: AUTHORIZED_USER_ID, is_bot: false, first_name: 'Owner' },
+        text: '/rimuovi 1',
+      },
+    };
+
+    await handler.handleUpdate(updateRemove);
+
+    expect(mockTelegramClient.sendMessage).toHaveBeenCalledWith(
+      AUTHORIZED_USER_ID,
+      expect.stringContaining('Yellow'),
+      expect.objectContaining({
+        reply_markup: expect.objectContaining({
+          inline_keyboard: [
+            [
+              expect.objectContaining({ callback_data: `rem:ok:${song2.song.id}` }),
+              expect.objectContaining({ callback_data: 'rem:cancel' }),
+            ],
+          ],
+        }),
+      })
+    );
+
+    // 3. Request removal by index '2' (Sereb Brancale)
+    const updateRemove2: TelegramUpdate = {
+      update_id: 13,
+      message: {
+        message_id: 13,
+        date: 1000,
+        chat: { id: AUTHORIZED_USER_ID, type: 'private' },
+        from: { id: AUTHORIZED_USER_ID, is_bot: false, first_name: 'Owner' },
+        text: '/rimuovi 2',
+      },
+    };
+
+    await handler.handleUpdate(updateRemove2);
+
+    expect(mockTelegramClient.sendMessage).toHaveBeenCalledWith(
+      AUTHORIZED_USER_ID,
+      expect.stringContaining('Al mio paese'),
+      expect.objectContaining({
+        reply_markup: expect.objectContaining({
+          inline_keyboard: [
+            [
+              expect.objectContaining({ callback_data: `rem:ok:${song1.song.id}` }),
+              expect.objectContaining({ callback_data: 'rem:cancel' }),
+            ],
+          ],
+        }),
+      })
+    );
+  });
 });
+
