@@ -1,5 +1,7 @@
 ```text
-applet/
+MusicSync/
+├── .claude/
+│   └── settings.local.json
 ├── .gitignore
 ├── backend/
 │   ├── .dev.vars.example
@@ -81,7 +83,9 @@ applet/
 ├── CLAUDE.md
 ├── client/
 │   ├── config.example.toml
+│   ├── MusicSync_icon.ico
 │   ├── pyproject.toml
+│   ├── README.md
 │   ├── requirements.txt
 │   ├── src/
 │   │   └── music_sync/
@@ -89,7 +93,10 @@ applet/
 │   │       ├── __main__.py
 │   │       ├── application/
 │   │       │   ├── __init__.py
-│   │       │   └── importer.py
+│   │       │   ├── executor.py
+│   │       │   ├── importer.py
+│   │       │   ├── planner.py
+│   │       │   └── sync_service.py
 │   │       ├── cli/
 │   │       │   ├── __init__.py
 │   │       │   ├── main.py
@@ -103,17 +110,23 @@ applet/
 │   │       └── infrastructure/
 │   │           ├── __init__.py
 │   │           ├── backend_client.py
+│   │           ├── downloader.py
 │   │           └── filesystem.py
 │   └── tests/
 │       ├── application/
-│       │   └── test_importer.py
+│       │   ├── test_executor.py
+│       │   ├── test_importer.py
+│       │   ├── test_planner.py
+│       │   └── test_sync_service.py
 │       ├── cli/
-│       │   └── test_cli.py
+│       │   ├── test_cli.py
+│       │   └── test_sync_cli.py
 │       ├── domain/
 │       │   ├── test_filename_parser.py
 │       │   └── test_normalization.py
 │       └── infrastructure/
 │           ├── test_backend_client.py
+│           ├── test_downloader.py
 │           └── test_filesystem.py
 ├── DEVELOPMENT_PLAN.md
 ├── docs/
@@ -130,7 +143,9 @@ applet/
 ├── package-lock.json
 ├── package.json
 ├── public/
+│   ├── MusicSync_icon.ico
 │   └── MusicSync_icon.png
+├── README.md
 ├── requirements.txt
 ├── tools/
 │   └── project_tree/
