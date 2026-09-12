@@ -264,7 +264,13 @@ def run_cli(args: Optional[List[str]] = None) -> int:
 
 def main() -> None:
     """Standard console entrypoint."""
-    sys.exit(run_cli())
+    exit_code = run_cli()
+    if getattr(sys, "frozen", False):
+        try:
+            input("\nPremi INVIO per uscire...")
+        except (EOFError, KeyboardInterrupt):
+            pass
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
