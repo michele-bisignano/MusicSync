@@ -26,6 +26,10 @@ class ClientConfig:
     usb_path: str
     managed_folder: str = "Music"
     timeout: int = 30
+    download_delay_min: float = 2.0
+    download_delay_max: float = 4.0
+    rate_limit_backoff: float = 30.0
+    max_retries_per_track: int = 2
 
 
 class ConfigurationError(Exception):
@@ -124,6 +128,30 @@ def load_config(
         or toml_data.get("timeout", 30)
     )
 
+    download_delay_min = float(
+        overrides.get("download_delay_min")
+        or os.environ.get("MUSICSYNC_DOWNLOAD_DELAY_MIN")
+        or toml_data.get("download_delay_min", 2.0)
+    )
+
+    download_delay_max = float(
+        overrides.get("download_delay_max")
+        or os.environ.get("MUSICSYNC_DOWNLOAD_DELAY_MAX")
+        or toml_data.get("download_delay_max", 4.0)
+    )
+
+    rate_limit_backoff = float(
+        overrides.get("rate_limit_backoff")
+        or os.environ.get("MUSICSYNC_RATE_LIMIT_BACKOFF")
+        or toml_data.get("rate_limit_backoff", 30.0)
+    )
+
+    max_retries_per_track = int(
+        overrides.get("max_retries_per_track")
+        or os.environ.get("MUSICSYNC_MAX_RETRIES_PER_TRACK")
+        or toml_data.get("max_retries_per_track", 2)
+    )
+
     # 3. Validate required fields
     if not usb_path:
         raise ConfigurationError(
@@ -146,4 +174,8 @@ def load_config(
         usb_path=str(usb_path),
         managed_folder=str(managed_folder).strip(),
         timeout=timeout,
+        download_delay_min=download_delay_min,
+        download_delay_max=download_delay_max,
+        rate_limit_backoff=rate_limit_backoff,
+        max_retries_per_track=max_retries_per_track,
     )

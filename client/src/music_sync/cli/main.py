@@ -169,11 +169,17 @@ def run_cli(args: Optional[List[str]] = None) -> int:
         print("[ERROR] Backend URL and SYNC_TOKEN are required for synchronization.", file=sys.stderr)
         return 1
 
-    downloader = YtDlpDownloader(quiet=not parsed_args.verbose)
+    downloader = YtDlpDownloader(
+        quiet=not parsed_args.verbose,
+        rate_limit_backoff=config.rate_limit_backoff,
+        max_retries=config.max_retries_per_track,
+    )
     sync_service = SyncService(
         backend_client=backend,
         filesystem=fs,
         downloader=downloader,
+        download_delay_min=config.download_delay_min,
+        download_delay_max=config.download_delay_max,
     )
 
     print(f"[INFO] Starting synchronization for USB folder: {fs.managed_root}")

@@ -8,6 +8,8 @@ from abc import ABC, abstractmethod
 import os
 from pathlib import Path
 import shutil
+import sys
+import time
 from typing import Any, Dict, Optional
 import uuid
 
@@ -90,13 +92,39 @@ def apply_id3v23_tags(
         pass
 
 
+def is_rate_limit_error(message: str) -> bool:
+    """Detects whether an error message indicates rate limiting or anti-bot throttling from YouTube."""
+    msg = message.lower()
+    rate_limit_keywords = [
+        "429",
+        "too many requests",
+        "rate limit",
+        "confirm you're not a bot",
+        "confirm you are not a bot",
+        "sign in to confirm you’re not a bot",
+        "sign in to confirm you're not a bot",
+        "bot detection",
+        "http error 403",
+        "captcha",
+    ]
+    return any(kw in msg for kw in rate_limit_keywords)
+
+
 class YtDlpDownloader(Downloader):
     """
     Concrete audio downloader utilizing yt-dlp and FFmpeg.
+    Supports autonomous rate-limit detection and exponential backoff retry.
     """
 
-    def __init__(self, quiet: bool = True):
+    def __init__(
+        self,
+        quiet: bool = True,
+        rate_limit_backoff: float = 30.0,
+        max_retries: int = 2,
+    ):
         self.quiet = quiet
+        self.rate_limit_backoff = rate_limit_backoff
+        self.max_retries = max_retries
 
     def download_track(
         self,
@@ -109,6 +137,7 @@ class YtDlpDownloader(Downloader):
         """
         Downloads audio from youtube_url to a temporary .part file,
         converts to MP3, tags with ID3v2.3, and atomically moves to destination_path.
+        Includes automatic retry with exponential backoff if rate limits or bot blocks are encountered.
         """
         if not youtube_url or not youtube_url.strip():
             raise DownloaderError("Cannot download track: YouTube URL is empty")
@@ -119,74 +148,95 @@ class YtDlpDownloader(Downloader):
         destination_path = Path(destination_path).resolve()
         destination_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Generate a collision-free, safe temporary identifier to avoid % formatting issues in outtmpl
-        temp_id = uuid.uuid4().hex[:12]
-        temp_prefix = f"_ms_tmp_{temp_id}"
-        temp_template = destination_path.parent / f"{temp_prefix}.%(ext)s"
-        temp_part_file = destination_path.parent / f"{destination_path.name}.part"
+        for attempt in range(self.max_retries + 1):
+            temp_id = uuid.uuid4().hex[:12]
+            temp_prefix = f"_ms_tmp_{temp_id}"
+            temp_template = destination_path.parent / f"{temp_prefix}.%(ext)s"
+            temp_part_file = destination_path.parent / f"{destination_path.name}.part"
 
-        # Remove any stale temporary .part file
-        if temp_part_file.exists():
+            # Remove any stale temporary .part file
+            if temp_part_file.exists():
+                try:
+                    temp_part_file.unlink()
+                except OSError:
+                    pass
+
+            ydl_opts: Dict[str, Any] = {
+                "format": "bestaudio/best",
+                "outtmpl": str(temp_template),
+                "postprocessors": [
+                    {
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": "192",
+                    }
+                ],
+                "noplaylist": True,
+                "quiet": self.quiet,
+                "no_warnings": self.quiet,
+                "overwrites": True,
+                "retries": 5,
+                "fragment_retries": 5,
+                "extractor_retries": 3,
+                "ignoreerrors": False,
+            }
+
             try:
-                temp_part_file.unlink()
-            except OSError:
-                pass
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    error_code = ydl.download([youtube_url.strip()])
+                    if error_code != 0:
+                        raise DownloaderError(f"yt-dlp download failed with exit code {error_code}")
 
-        ydl_opts: Dict[str, Any] = {
-            "format": "bestaudio/best",
-            "outtmpl": str(temp_template),
-            "postprocessors": [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }
-            ],
-            "noplaylist": True,
-            "quiet": self.quiet,
-            "no_warnings": self.quiet,
-            "overwrites": True,
-        }
+                # Locate the generated MP3 file
+                converted_mp3 = destination_path.parent / f"{temp_prefix}.mp3"
+                if not converted_mp3.exists():
+                    candidates = list(destination_path.parent.glob(f"{temp_prefix}*"))
+                    mp3_candidates = [c for c in candidates if c.suffix.lower() == ".mp3"]
+                    if mp3_candidates:
+                        converted_mp3 = mp3_candidates[0]
+                    elif candidates:
+                        converted_mp3 = candidates[0]
+                    else:
+                        raise DownloaderError("Converted MP3 file was not found after yt-dlp execution")
 
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                error_code = ydl.download([youtube_url.strip()])
-                if error_code != 0:
-                    raise DownloaderError(f"yt-dlp download failed with exit code {error_code}")
+                # Move to .part file first
+                shutil.move(str(converted_mp3), str(temp_part_file))
 
-            # Locate the generated MP3 file
-            converted_mp3 = destination_path.parent / f"{temp_prefix}.mp3"
-            if not converted_mp3.exists():
-                candidates = list(destination_path.parent.glob(f"{temp_prefix}*"))
-                mp3_candidates = [c for c in candidates if c.suffix.lower() == ".mp3"]
-                if mp3_candidates:
-                    converted_mp3 = mp3_candidates[0]
-                elif candidates:
-                    converted_mp3 = candidates[0]
-                else:
-                    raise DownloaderError("Converted MP3 file was not found after yt-dlp execution")
+                # Apply ID3v2.3 tags
+                apply_id3v23_tags(temp_part_file, artist=artist, title=title, version_type=version_type)
 
-            # Move to .part file first
-            shutil.move(str(converted_mp3), str(temp_part_file))
+                # Atomic rename from .part to final destination
+                if destination_path.exists():
+                    destination_path.unlink()
+                shutil.move(str(temp_part_file), str(destination_path))
 
-            # Apply ID3v2.3 tags
-            apply_id3v23_tags(temp_part_file, artist=artist, title=title, version_type=version_type)
+                return destination_path
 
-            # Atomic rename from .part to final destination
-            if destination_path.exists():
-                destination_path.unlink()
-            shutil.move(str(temp_part_file), str(destination_path))
+            except Exception as e:
+                # Clean up all temporary files matching temp_prefix or temp_part_file on failure
+                for cleanup_target in [temp_part_file, *destination_path.parent.glob(f"{temp_prefix}*")]:
+                    if cleanup_target.exists():
+                        try:
+                            cleanup_target.unlink()
+                        except OSError:
+                            pass
 
-            return destination_path
+                err_str = str(e)
+                is_throttled = is_rate_limit_error(err_str)
 
-        except Exception as e:
-            # Clean up all temporary files matching temp_prefix or temp_part_file on failure
-            for cleanup_target in [temp_part_file, *destination_path.parent.glob(f"{temp_prefix}*")]:
-                if cleanup_target.exists():
-                    try:
-                        cleanup_target.unlink()
-                    except OSError:
-                        pass
-            if isinstance(e, DownloaderError):
-                raise
-            raise DownloaderError(f"Download failed for '{title} - {artist}' ({youtube_url}): {e}") from e
+                # If rate limited and retries remain, back off and retry
+                if is_throttled and attempt < self.max_retries:
+                    wait_time = self.rate_limit_backoff * (2 ** attempt)
+                    print(
+                        f"\n[RATE-LIMIT ATTESA] YouTube ha rallentato le richieste. "
+                        f"Pausa di sicurezza di {int(wait_time)}s prima del tentativo {attempt + 1}/{self.max_retries}...",
+                        file=sys.stderr,
+                    )
+                    time.sleep(wait_time)
+                    continue
+
+                if isinstance(e, DownloaderError):
+                    raise
+                raise DownloaderError(f"Download failed for '{title} - {artist}' ({youtube_url}): {e}") from e
+
+        raise DownloaderError(f"Download failed after {self.max_retries} retries for '{title} - {artist}'")

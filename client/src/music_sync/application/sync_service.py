@@ -33,6 +33,8 @@ class SyncService:
         downloader: Downloader,
         planner: Optional[SyncPlanner] = None,
         executor: Optional[SyncExecutor] = None,
+        download_delay_min: float = 2.0,
+        download_delay_max: float = 4.0,
     ):
         self.backend_client = backend_client
         self.filesystem = filesystem
@@ -42,6 +44,8 @@ class SyncService:
             filesystem=self.filesystem,
             downloader=self.downloader,
             backend_client=self.backend_client,
+            download_delay_min=download_delay_min,
+            download_delay_max=download_delay_max,
         )
 
     def synchronize(self, dry_run: bool = False) -> Tuple[SyncPlan, Optional[SyncExecutionResult]]:

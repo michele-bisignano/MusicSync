@@ -4,6 +4,8 @@ Executes a SyncPlan by orchestrating FileSystem deletions, Downloader audio acqu
 and sending the final consolidated report to the Backend API.
 """
 
+import random
+import time
 from typing import Any, Dict, List, Tuple
 
 from ..domain.models import (
@@ -19,7 +21,7 @@ from ..infrastructure.filesystem import FileSystem, FileSystemError
 
 class SyncExecutor:
     """
-    Executes a SyncPlan deterministically.
+    Executes a SyncPlan deterministically with built-in pacing and rate limit respect.
     """
 
     def __init__(
@@ -27,10 +29,14 @@ class SyncExecutor:
         filesystem: FileSystem,
         downloader: Downloader,
         backend_client: BackendClient,
+        download_delay_min: float = 2.0,
+        download_delay_max: float = 4.0,
     ):
         self.filesystem = filesystem
         self.downloader = downloader
         self.backend_client = backend_client
+        self.download_delay_min = max(0.0, download_delay_min)
+        self.download_delay_max = max(self.download_delay_min, download_delay_max)
 
     def execute(self, plan: SyncPlan) -> SyncExecutionResult:
         """
@@ -91,9 +97,12 @@ class SyncExecutor:
                 failed_deletions.append((item, str(e)))
 
         # 3. Process Downloads (Desired tracks missing physically on USB)
-        for item in plan.to_download:
-            if not item.youtube_url:
-                continue
+        valid_downloads = [item for item in plan.to_download if item.youtube_url]
+        total_downloads = len(valid_downloads)
+
+        for idx, item in enumerate(valid_downloads, start=1):
+            assert item.youtube_url is not None
+            print(f"[DOWNLOAD {idx}/{total_downloads}] '{item.title} - {item.artist}' da YouTube...")
 
             try:
                 dest_path = self.filesystem.resolve_safe_path(item.relative_path)
@@ -118,6 +127,13 @@ class SyncExecutor:
                             "relative_path": item.relative_path,
                         }
                     )
+
+                # Pacing delay between successive downloads to avoid YouTube bot throttling
+                if idx < total_downloads and self.download_delay_max > 0:
+                    delay = random.uniform(self.download_delay_min, self.download_delay_max)
+                    if delay > 0:
+                        time.sleep(delay)
+
             except (DownloaderError, FileSystemError, Exception) as e:
                 failed_downloads.append((item, str(e)))
 

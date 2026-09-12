@@ -15,3 +15,16 @@ usb_path = "D:\\"
 # Managed music subfolder inside the USB drive (relative to usb_path)
 # Operations will strictly be isolated to this folder.
 managed_folder = "Music"
+
+# --- Opzioni di Download & Rate Limiting (Autonome) ---
+# Pausa minima e massima (in secondi con variazione casuale) tra due canzoni consecutive
+# Evita che YouTube rilevi scaricamenti a raffica simulando un comportamento umano naturale
+download_delay_min = 2.0
+download_delay_max = 4.0
+
+# Pausa di sicurezza (in secondi) se YouTube segnala troppe richieste (HTTP 429 / bot detection)
+# L'app attenderà autonomamente prima di ritentare
+rate_limit_backoff = 30.0
+
+# Numero massimo di tentativi automatici per brano prima di passare al successivo
+max_retries_per_track = 2
