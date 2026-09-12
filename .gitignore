@@ -36,6 +36,12 @@ venv/
 .pytest_cache/
 *.egg-info/
 .coverage
+build/
+dist/
+*.spec
+client/build/
+client/dist/
+client/*.spec
 
 # Logs & Caches
 *.log
